@@ -1,0 +1,17 @@
+{
+  "name": "jev-auto-router",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Jev-powered automatic model routing for coding agents",
+  "bin": {
+    "codex": "./src/codex-wrapper.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/codex-wrapper.js && node --check src/terminal-chat.js && node --check src/app-server-client.js && node --check src/jev.js && node --check src/policy.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
