@@ -12,8 +12,6 @@ codex       # normal Codex
 claude      # normal Claude Code
 ```
 
-> [!WARNING]
-> This is an experimental local tool. It can reduce unnecessary use of larger models, but it does not guarantee lower cost or better results. Measure it against your own tasks.
 
 ## What it does
 
