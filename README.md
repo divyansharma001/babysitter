@@ -35,13 +35,21 @@ Start the terminal chat exactly as you normally start Codex:
 codex
 ```
 
-For every prompt, the terminal prints the selected model and effort before Codex answers:
+For every prompt, the terminal shows a colored routing card before Codex answers. It includes the selected tier, model, effort, classifier confidence, routing reason, and Jev token usage. Codex Markdown is rendered as readable terminal headings, lists, quotes, inline code, and code blocks.
 
 ```text
-You › Fix the typo in README
-[auto] gpt-5.6-luna · low · Jev 143 input tokens
+YOU ❯ Fix the typo in README
+╭─ ROUTE ◆ LUNA
+│ Model       gpt-5.6-luna
+│ Effort      low
+│ Confidence  94%
+│ Why         complexity=0/3
+│ Router      Jev · 143 input tokens
+╰──────────────────────────────────────────────
 
-Codex › ...
+╭─ CODEX
+Updated README.md.
+╰─ ✓ Complete · gpt-5.6-luna · 2.1s
 ```
 
 You can also start with a prompt:
@@ -59,6 +67,41 @@ codex exec "Review the current changes for security problems"
 ```
 
 Set `JEV_AUTO_REAL_CODEX` only if the wrapper cannot locate the real Codex executable.
+
+Set the standard `NO_COLOR=1` environment variable if you need plain terminal output.
+
+## Share it from GitHub
+
+Before publishing, make sure `.env` is not committed. This repository already ignores it, but verify with:
+
+```sh
+git check-ignore .env
+git status
+```
+
+Never publish a real TypeSafe key. If a key appears in a screenshot, commit, issue, or chat, revoke it and create a new one.
+
+Someone installing your GitHub project needs Node.js 20+, their own TypeSafe API key, and the official Codex CLI. The standalone Codex installer is recommended because this project wraps the `codex` command.
+
+```sh
+# First install Codex, then authenticate once
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+codex login
+
+# Install this router from GitHub
+git clone https://github.com/divyansharma001/babysitter.git
+cd babysitter
+cp .env.example .env
+# Put the installer's own TYPESAFE_API_KEY in .env
+npm link
+
+# Start the routed terminal
+codex
+```
+
+Each person supplies their own key; `.env` is never shared. To receive updates later, they can run `git pull` in the cloned repository. Because `npm link` points at that checkout, no reinstall is normally needed unless the package metadata changes.
+
+For a polished public release, add a license, include one screenshot or short terminal recording, and tag releases such as `v0.1.0`. Publishing to npm can come later; a GitHub clone plus `npm link` is enough for the first users.
 
 ## Important limitation
 
