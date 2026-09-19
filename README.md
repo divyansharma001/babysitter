@@ -126,15 +126,49 @@ Override Claude mappings with `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TER
 
 ### Cache-aware Claude routing
 
-Claude prompt caches are model-specific, and changing effort can also invalidate cached context. Babysitter still evaluates every prompt, but it applies session affinity before accepting the recommendation:
+Claude Code preserves a resumed conversation by making its previous messages available to the next request. That history still counts as context. [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) can make repeated context substantially cheaper, but the cache is model-specific: a cache created for Sonnet cannot be reused by Haiku or Opus. Changing Claude's [thinking or effort configuration](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost) can invalidate cached context too.
+
+This means blindly switching models after every classification can cost more than it saves in a long chat. Babysitter therefore separates **classification** from **switching**: Jev still evaluates every prompt, while a cache-aware session policy decides whether changing the active Claude model is worth reloading the conversation.
+
+The default policy is:
 
 - Quality upgrades are allowed immediately.
 - Downgrades wait until the current model has handled at least three turns.
 - Once the estimated conversation context reaches 12,000 tokens, automatic downgrades are blocked to avoid loading the full history into another model.
 - Lower effort is not applied inside a warm model session because it would reset the cache.
+- A higher-effort quality upgrade can still happen when the selected tier requires it.
 - `/compact` creates a focused handoff and starts a fresh routed session, allowing the next model to receive the important state without replaying the full transcript.
 
-Claude responses show new input, cache-read, cache-write, output-token, and cost data when Claude Code returns those fields. Change the defaults with `JEV_AUTO_CLAUDE_CACHE_LOCK_TOKENS` and `JEV_AUTO_CLAUDE_MIN_TURNS_PER_MODEL`.
+The route card explains when the selected model was kept for cache safety or changed for quality. After an answer, Babysitter displays the usage information returned by Claude Code:
+
+| Field | Meaning |
+| --- | --- |
+| `new` | Uncached input tokens processed for this request |
+| `cache read` | Earlier context reused from Claude's prompt cache |
+| `cache write` | Context written into a new or updated cache entry |
+| `output` | Tokens generated in the response |
+| `cost` | Provider-reported cost, when Claude Code supplies it |
+
+Cached tokens may still appear in usage totals; a cache read is not the same as paying the full uncached-input rate. Subscription limits and API billing are controlled by Anthropic and may account for usage differently. Babysitter reports the provider values without inventing an estimated saving.
+
+Change the session-affinity defaults with `JEV_AUTO_CLAUDE_CACHE_LOCK_TOKENS` and `JEV_AUTO_CLAUDE_MIN_TURNS_PER_MODEL`.
+
+#### What `/compact` does in `bbs-claude`
+
+Babysitter's Claude `/compact` deliberately creates a new session rather than asking a different model to load the entire old transcript:
+
+1. The active model creates a concise handoff containing the goal, decisions, constraints, relevant files, completed work, verification results, unresolved issues, and next steps.
+2. Babysitter closes the active routing context while leaving the original Claude session saved.
+3. The next user prompt is classified normally.
+4. The selected model starts a fresh Claude session with the compact handoff plus the new prompt.
+
+You can add a focus instruction:
+
+```text
+/compact preserve the database migration decisions and remaining test failures
+```
+
+Compaction trades perfect transcript fidelity for a much smaller context. Use `/native` when you need Claude Code's own compaction behavior instead.
 
 ## Configuration
 
@@ -195,12 +229,20 @@ bbs-codex resume <thread-id>
 
 # Continue the most recent Claude Code session in this directory
 bbs-claude continue
+bbs-claude -c
+bbs-claude --continue
 
 # Resume a Claude Code session by its ID or name
 bbs-claude resume <session-id-or-name>
+bbs-claude -r <session-id-or-name>
+bbs-claude --resume <session-id-or-name>
 ```
 
-`bbs-claude` prints its session ID after a successful response so it can be resumed later. `bbs-claude sessions` opens Claude Code's native session picker for browsing, but that picker is provider-owned and runs as normal Claude Code; use `bbs-claude resume <session-id-or-name>` to return to a routed Babysitter session.
+`resume`, `-r`, and `--resume` are equivalent. You can append the first prompt, for example `bbs-claude -r auth-refactor "Finish this PR"`. Likewise, `continue`, `-c`, and `--continue` all use the routed continue behavior.
+
+`bbs-claude` prints its session ID after a successful response so it can be resumed later. Resuming preserves the conversation, but the first routed prompt may still cause a cache miss if Jev selects a different model than the one previously used in that session.
+
+Running `bbs-claude -r` without an ID, or running `bbs-claude sessions`, opens Claude Code's native session picker for browsing. That picker is provider-owned and runs as normal Claude Code; pass the selected ID or name to `bbs-claude -r` to return to a routed Babysitter session.
 
 ## Slash commands and native terminals
 
@@ -216,6 +258,8 @@ Babysitter implements the commands that need to cooperate with routing and conte
 | `/help` | Shows Babysitter commands | Shows Babysitter commands |
 
 Provider CLIs have many commands and can add more over time. Babysitter does not pretend to reimplement all of them: use `/native` whenever you need the official terminal. The same saved session is handed over, so its conversation is retained. Automatic routing is paused while the native provider terminal owns the session.
+
+Unknown slash commands are never silently sent to the model as ordinary prompt text. Babysitter explains that the command is not implemented and directs the user to `/native`.
 
 ## Limitations
 
