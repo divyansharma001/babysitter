@@ -1,10 +1,10 @@
-# Jev Auto Router
+# Babysitter
 
-Jev Auto makes the ordinary `codex` or `claude` terminal command choose a model for every prompt. It asks Jev to classify the current prompt, applies a deterministic policy, and starts that turn with the selected model and reasoning effort.
+Babysitter adds automatic per-prompt model routing without replacing the official `codex` or `claude` commands. Run `bbs-Codex` for a routed Codex session or `bbs-Claude` for a routed Claude Code session. Babysitter asks Jev to classify every prompt, applies a deterministic policy, and starts that turn with the selected model and reasoning effort.
 
-Claude support is available through the `claude` binary. It uses the official Claude Code CLI, keeps a conversation alive with `--resume`, and maps Jev tiers to Haiku, Sonnet, and Opus. Set `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL` to pin different Claude model IDs.
+Claude support uses the official Claude Code CLI, keeps a conversation alive with `--resume`, and maps Jev tiers to Haiku, Sonnet, and Opus. Set `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL` to pin different Claude model IDs. Set `JEV_AUTO_REAL_CLAUDE` only when automatic discovery cannot find the official executable.
 
-The same Codex conversation is preserved between prompts. Only the model and effort can change, so a simple follow-up can use Luna and a difficult follow-up can move to Sol or Astra without starting another session.
+The same conversation is preserved between prompts in each Babysitter session. Only the model and effort can change from turn to turn.
 
 ## Routing policy
 
@@ -30,7 +30,7 @@ These numeric thresholds are this project's policy, not thresholds published by 
 
 ## Setup
 
-Requirements: Node.js 20+, Codex CLI, and a TypeSafe API key.
+Requirements: Node.js 20+, a TypeSafe API key, and the official Codex CLI and/or Claude Code CLI you want Babysitter to route.
 
 ```sh
 cp .env.example .env
@@ -42,19 +42,28 @@ The launcher checks the current directory's `.env` and then this router's `.env`
 
 ## Use
 
-Start the terminal chat exactly as you normally start Codex:
+Start a Babysitter-routed Codex session:
 
 ```sh
-codex
+bbs-Codex
 ```
 
-For Claude Code, use:
+Start a Babysitter-routed Claude Code session:
 
 ```sh
-claude
+bbs-Claude
+```
+
+The original commands remain unchanged:
+
+```sh
+codex   # normal Codex CLI
+claude  # normal Claude Code CLI
 ```
 
 The Claude launcher requires an authenticated Claude Code installation. For a shareable agent product, use an Anthropic API key or supported cloud-provider credentials; Anthropic’s subscription OAuth is intended for the unmodified Claude Code application.
+
+The Claude wrapper routes every prompt by running Claude Code in print mode and resuming the same session ID with that turn's `--model` and `--effort`. Claude Code officially supports print mode, session resume, model selection, and effort selection through these CLI flags.
 
 For every prompt, the terminal shows a colored routing card before Codex answers. It includes the selected tier, model, effort, classifier confidence, routing reason, and Jev token usage. Codex Markdown is rendered as readable terminal headings, lists, quotes, inline code, and code blocks.
 
@@ -76,15 +85,15 @@ Updated README.md.
 You can also start with a prompt:
 
 ```sh
-codex "Find and fix the race condition in the payment worker"
+bbs-Codex "Find and fix the race condition in the payment worker"
 ```
 
 Type `/exit` or `/quit` to leave the session.
 
-Operational commands still go directly to the real Codex CLI, including `codex login`, `codex --help`, and `codex --version`. Non-interactive execution is also routed once:
+Non-interactive Babysitter execution is also routed once:
 
 ```sh
-codex exec "Review the current changes for security problems"
+bbs-Codex exec "Review the current changes for security problems"
 ```
 
 Set `JEV_AUTO_REAL_CODEX` only if the wrapper cannot locate the real Codex executable.
@@ -102,12 +111,16 @@ git status
 
 Never publish a real TypeSafe key. If a key appears in a screenshot, commit, issue, or chat, revoke it and create a new one.
 
-Someone installing your GitHub project needs Node.js 20+, their own TypeSafe API key, and the official Codex CLI. The standalone Codex installer is recommended because this project wraps the `codex` command.
+Someone installing your GitHub project needs Node.js 20+, their own TypeSafe API key, and whichever official CLI they want Babysitter to route. Babysitter uses separate command names, so it does not replace either official CLI.
 
 ```sh
 # First install Codex, then authenticate once
 curl -fsSL https://chatgpt.com/codex/install.sh | sh
 codex login
+
+# Optional: install Claude Code, then authenticate once
+curl -fsSL https://claude.ai/install.sh | bash
+claude auth login
 
 # Install this router from GitHub
 git clone https://github.com/divyansharma001/babysitter.git
@@ -116,8 +129,9 @@ cp .env.example .env
 # Put the installer's own TYPESAFE_API_KEY in .env
 npm link
 
-# Start the routed terminal
-codex
+# Start either routed terminal
+bbs-Codex
+bbs-Claude
 ```
 
 Each person supplies their own key; `.env` is never shared. To receive updates later, they can run `git pull` in the cloned repository. Because `npm link` points at that checkout, no reinstall is normally needed unless the package metadata changes.
@@ -126,7 +140,7 @@ For a polished public release, add a license, include one screenshot or short te
 
 ## Important limitation
 
-The wrapper controls conversations started with this terminal command. It cannot intercept prompts typed into an already-running stock Codex TUI. Exit that old session and start a fresh one with `codex` after installation.
+Babysitter controls only conversations started with `bbs-Codex` or `bbs-Claude`. It does not intercept prompts typed into an already-running official Codex or Claude session.
 
 ## Why this can save usage
 

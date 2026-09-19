@@ -80,7 +80,7 @@ function tierColor(tier, colors) {
 export function printWelcome(stream = process.stdout) {
   const colors = palette(hasColor(stream));
   stream.write(`\n${colors.cyan("╭──────────────────────────────────────────────╮")}\n`);
-  stream.write(`${colors.cyan("│")}  ${colors.bold(colors.magenta("◆ JEV AUTO"))}  ${colors.dim("smart model routing for Codex")}  ${colors.cyan("│")}\n`);
+  stream.write(`${colors.cyan("│")}  ${colors.bold(colors.magenta("◆ BABYSITTER"))} ${colors.dim("smart model routing for Codex")} ${colors.cyan("│")}\n`);
   stream.write(`${colors.cyan("╰──────────────────────────────────────────────╯")}\n`);
   stream.write(`${colors.dim("  A fresh route for every prompt · /exit to quit")}\n\n`);
 }

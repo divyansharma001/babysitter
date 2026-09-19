@@ -69,3 +69,9 @@ test("uses a conservative fallback when Jev is unavailable", () => {
   assert.equal(route.tier, "terra");
   assert.equal(route.effort, "medium");
 });
+
+test("maps routing tiers to Claude model aliases", () => {
+  assert.equal(routeTask(signals({ complexity: { score: 0, confidence: 0.9 } }), {}, "claude").model, "haiku");
+  assert.equal(routeTask(signals(), {}, "claude").model, "sonnet");
+  assert.equal(routeTask(signals({ complexity: { score: 2, confidence: 0.9 } }), {}, "claude").model, "opus");
+});

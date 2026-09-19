@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 export class CodexAppServer {
   static async create(cwd) {
     const client = new CodexAppServer(cwd);
-    await client.request("initialize", { clientInfo: { name: "jev-auto", title: "Jev Auto", version: "0.1.0" } });
+    await client.request("initialize", { clientInfo: { name: "babysitter", title: "Babysitter", version: "0.1.0" } });
     client.notify("initialized", {});
     const started = await client.request("thread/start", { cwd, model: "gpt-5.6-terra", approvalPolicy: "never" });
     client.threadId = started.thread.id;

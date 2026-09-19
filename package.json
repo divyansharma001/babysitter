@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Jev-powered automatic model routing for coding agents",
   "bin": {
-    "codex": "./src/codex-wrapper.js",
-    "claude": "./src/claude-wrapper.js"
+    "bbs-Codex": "./src/codex-wrapper.js",
+    "bbs-Claude": "./src/claude-wrapper.js"
   },
   "scripts": {
     "test": "node --test",
