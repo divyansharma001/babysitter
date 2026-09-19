@@ -17,6 +17,7 @@ import { chooseClaudeSessionRoute, claudeUsage } from "./claude-session-policy.j
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
 import { palette, printAnswer, printRoute, printWelcome, startSpinner } from "./terminal-ui.js";
+import { checkForBabysitterUpdate, updateNotice } from "./update.js";
 
 const wrapperPath = realpathSync(fileURLToPath(import.meta.url));
 const PASSTHROUGH = new Set([
@@ -180,6 +181,8 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
   let activePermissionMode = claudePermissionMode();
   let nextPrompt = initialPrompt;
   printWelcome(process.stdout, "Claude Code");
+  const availableUpdate = await checkForBabysitterUpdate();
+  if (availableUpdate) process.stdout.write(`${colors.yellow("↑")} ${colors.bold(updateNotice(availableUpdate))}\n\n`);
   process.stdout.write(`${colors.green("✓")} ${colors.dim("Claude Code session ready")}\n\n`);
   try {
     while (true) {

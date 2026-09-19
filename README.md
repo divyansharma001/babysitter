@@ -57,7 +57,7 @@ npm install
 npm link
 ```
 
-`npm link` makes `bbs-codex` and `bbs-claude` available in your terminal. Your `.env` stays local and must never be committed.
+`npm link` makes `bbs-codex`, `bbs-claude`, and `bbs-update` available in your terminal. Your `.env` stays local and must never be committed.
 
 ### 3. Start a routed session
 
@@ -77,6 +77,26 @@ bbs-claude "Find and fix the race condition in the payment worker"
 Supplying a first prompt still opens the routed interactive session. If Claude asks follow-up questions or needs approval, answer in that same terminal and the current turn continues.
 
 Type `/exit` or `/quit` to leave an interactive session.
+
+## Updates
+
+Babysitter checks its GitHub repository at most once every 24 hours when a routed session starts. If the checked-out commit is behind `main`, both launchers show a short notice:
+
+```text
+↑ Babysitter update available · 3 new commits · run bbs-update
+```
+
+Install the update explicitly:
+
+```sh
+bbs-update
+```
+
+The updater uses `git pull --ff-only`, refreshes npm dependencies, and then asks the user to restart the routed session. It refuses to run when the Babysitter checkout contains local changes, so an update cannot silently overwrite someone's work. Update-check failures are silent and never block startup.
+
+Automatic background replacement is intentionally not the default: executing new repository code without review is a supply-chain risk and could also break an active session. Maintainers can publish normally by pushing commits to `main`; every clone will receive a notification on its next scheduled check.
+
+Set `JEV_AUTO_UPDATE_CHECK=0` to disable notifications or change `JEV_AUTO_UPDATE_INTERVAL_HOURS` from its default of `24`.
 
 ## How routing works
 

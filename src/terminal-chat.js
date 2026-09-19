@@ -4,6 +4,7 @@ import { CodexAppServer } from "./app-server-client.js";
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
 import { palette, printAnswer, printRoute, printSessions, printWelcome, startSpinner } from "./terminal-ui.js";
+import { checkForBabysitterUpdate, updateNotice } from "./update.js";
 
 async function selectRoute(prompt) {
   try {
@@ -18,6 +19,8 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   const colors = palette();
   printWelcome();
+  const availableUpdate = await checkForBabysitterUpdate();
+  if (availableUpdate) process.stdout.write(`${colors.yellow("↑")} ${colors.bold(updateNotice(availableUpdate))}\n\n`);
   let selectedThreadId = resumeThreadId;
   if (chooseResume) {
     const stopListing = startSpinner("Finding saved Codex sessions");

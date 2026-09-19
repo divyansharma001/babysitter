@@ -9,6 +9,7 @@ import {
   isRoutedPermissionMode,
 } from "../src/claude-permissions.js";
 import { answerClaudeQuestion, describeClaudeTool, handleClaudeInteraction } from "../src/claude-interaction.js";
+import { updateFromComparison, updateNotice } from "../src/update.js";
 
 function signals(overrides = {}) {
   return {
@@ -165,4 +166,12 @@ test("returns Claude clarification answers in the same tool request", async () =
   assert.equal(result.behavior, "allow");
   assert.equal(result.updatedInput.answers["Which database?"], "Postgres");
   assert.match(writes.join(""), /Which database/);
+});
+
+test("turns GitHub comparison data into an update notice", () => {
+  const update = updateFromComparison({ ahead_by: 2, commits: [{ sha: "one" }, { sha: "two" }] });
+  assert.equal(update.commits, 2);
+  assert.equal(update.latestCommit, "two");
+  assert.match(updateNotice(update), /2 new commits/);
+  assert.equal(updateFromComparison({ ahead_by: 0 }), null);
 });
