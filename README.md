@@ -1,6 +1,8 @@
 # Jev Auto Router
 
-Jev Auto makes the ordinary `codex` terminal command choose a model for every prompt. It asks Jev to classify the current prompt, applies a deterministic policy, and starts that Codex turn with the selected model and reasoning effort.
+Jev Auto makes the ordinary `codex` or `claude` terminal command choose a model for every prompt. It asks Jev to classify the current prompt, applies a deterministic policy, and starts that turn with the selected model and reasoning effort.
+
+Claude support is available through the `claude` binary. It uses the official Claude Code CLI, keeps a conversation alive with `--resume`, and maps Jev tiers to Haiku, Sonnet, and Opus. Set `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL` to pin different Claude model IDs.
 
 The same Codex conversation is preserved between prompts. Only the model and effort can change, so a simple follow-up can use Luna and a difficult follow-up can move to Sol or Astra without starting another session.
 
@@ -13,7 +15,18 @@ The same Codex conversation is preserved between prompts. Only the model and eff
 | Sol | `gpt-5.6-sol` | Complex, ambiguous, broad, or high-risk work |
 | Astra | `gpt-6-astra` | Hardest end-to-end work requiring sustained judgment |
 
-Jev evaluates complexity, risk, breadth, task type, and whether a material user decision is missing. High-risk and repository-wide work is promoted to at least Sol. Low classifier confidence promotes the task one tier. If Jev is unavailable, routing falls back to Terra/medium instead of blocking.
+Jev evaluates complexity, risk, breadth, task type, and whether a material user decision is missing. The policy follows the [official ChatGPT and Codex model guide](https://learn.chatgpt.com/docs/models): Luna handles clear repeatable work, Terra handles everyday work, Sol handles complex or open-ended work, and Astra is reserved for the hardest end-to-end workflows.
+
+The local routing rules are intentionally narrow:
+
+- Complexity `0 → Luna`, `1 → Terra`, and `2 → Sol`.
+- High-risk or repository-wide work is promoted to at least Sol.
+- Research as a task label does not promote a prompt by itself; its actual complexity and scope decide the tier.
+- Low classifier confidence is displayed but never promotes the model by itself.
+- Astra requires complexity `3` plus either high risk or broad scope. Otherwise, complexity `3` is capped at Sol.
+- Reasoning effort starts low and increases only for tasks that need more planning or checking.
+
+These numeric thresholds are this project's policy, not thresholds published by OpenAI or Jev. If Jev is unavailable, routing falls back to Terra/medium instead of blocking.
 
 ## Setup
 
@@ -34,6 +47,14 @@ Start the terminal chat exactly as you normally start Codex:
 ```sh
 codex
 ```
+
+For Claude Code, use:
+
+```sh
+claude
+```
+
+The Claude launcher requires an authenticated Claude Code installation. For a shareable agent product, use an Anthropic API key or supported cloud-provider credentials; Anthropic’s subscription OAuth is intended for the unmodified Claude Code application.
 
 For every prompt, the terminal shows a colored routing card before Codex answers. It includes the selected tier, model, effort, classifier confidence, routing reason, and Jev token usage. Codex Markdown is rendered as readable terminal headings, lists, quotes, inline code, and code blocks.
 

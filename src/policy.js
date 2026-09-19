@@ -5,27 +5,40 @@ const DEFAULT_MODELS = {
   astra: "gpt-6-astra",
 };
 
+const DEFAULT_CLAUDE_MODELS = {
+  luna: "haiku",
+  terra: "sonnet",
+  sol: "opus",
+  astra: "opus",
+};
+
 const LEVELS = ["luna", "terra", "sol", "astra"];
 
 function clampLevel(level) {
   return Math.max(0, Math.min(LEVELS.length - 1, level));
 }
 
-function modelCatalog(env = process.env) {
+function modelCatalog(env = process.env, provider = "codex") {
+  const defaults = provider === "claude" ? DEFAULT_CLAUDE_MODELS : DEFAULT_MODELS;
+  const prefix = provider === "claude" ? "JEV_AUTO_CLAUDE_" : "JEV_AUTO_";
   return {
-    luna: env.JEV_AUTO_LUNA_MODEL || DEFAULT_MODELS.luna,
-    terra: env.JEV_AUTO_TERRA_MODEL || DEFAULT_MODELS.terra,
-    sol: env.JEV_AUTO_SOL_MODEL || DEFAULT_MODELS.sol,
-    astra: env.JEV_AUTO_ASTRA_MODEL || DEFAULT_MODELS.astra,
+    luna: env[`${prefix}LUNA_MODEL`] || defaults.luna,
+    terra: env[`${prefix}TERRA_MODEL`] || defaults.terra,
+    sol: env[`${prefix}SOL_MODEL`] || defaults.sol,
+    astra: env[`${prefix}ASTRA_MODEL`] || defaults.astra,
   };
 }
 
-export function routeTask(signals, env = process.env) {
+export function routeTask(signals, env = process.env, provider = "codex") {
   const complexity = Math.round(signals.complexity.score);
   const risk = Math.round(signals.risk.score);
   const breadth = Math.round(signals.breadth.score);
 
-  let level = complexity;
+  // OpenAI's model guide positions Luna for clear/repeatable work, Terra for
+  // everyday work, Sol for complex/open-ended work, and Astra only for the
+  // hardest end-to-end workflows. Start from complexity, then require a
+  // corroborating high-impact signal before allowing Astra.
+  let level = Math.min(complexity, 2);
   const reasons = [`complexity=${complexity}/3`];
 
   if (risk >= 2 && level < 2) {
@@ -38,11 +51,6 @@ export function routeTask(signals, env = process.env) {
     reasons.push("repository-wide scope requires at least Sol");
   }
 
-  if (signals.taskType.choice === "architecture_or_research" && level < 2) {
-    level = 2;
-    reasons.push("architecture/research requires at least Sol");
-  }
-
   const classifierConfidence = Math.min(
     signals.complexity.confidence,
     signals.risk.confidence,
@@ -50,9 +58,16 @@ export function routeTask(signals, env = process.env) {
     signals.taskType.confidence,
   );
 
-  if (classifierConfidence < 0.45 && level < 3) {
-    level += 1;
-    reasons.push("low router confidence promoted one tier");
+  const astraEligible = complexity === 3 && (risk >= 2 || breadth >= 2);
+  if (astraEligible) {
+    level = 3;
+    reasons.push("Astra requires complexity=3 plus high risk or broad scope");
+  } else if (complexity === 3) {
+    reasons.push("Astra gate not met; capped at Sol");
+  }
+
+  if (classifierConfidence < 0.45) {
+    reasons.push("low confidence noted; tier not increased");
   }
 
   level = clampLevel(level);
@@ -60,12 +75,12 @@ export function routeTask(signals, env = process.env) {
 
   let effort = "low";
   if (level === 1) effort = "medium";
-  if (level === 2) effort = risk >= 2 ? "xhigh" : "high";
+  if (level === 2) effort = complexity === 3 || risk === 3 ? "xhigh" : "high";
   if (level === 3) effort = "xhigh";
 
   return {
     tier,
-    model: modelCatalog(env)[tier],
+    model: modelCatalog(env, provider)[tier],
     effort,
     needsHumanInput: signals.needsClarification.noul >= 0.72,
     clarificationProbability: signals.needsClarification.noul,
@@ -74,10 +89,10 @@ export function routeTask(signals, env = process.env) {
   };
 }
 
-export function fallbackRoute(env = process.env) {
+export function fallbackRoute(env = process.env, provider = "codex") {
   return {
     tier: "terra",
-    model: modelCatalog(env).terra,
+    model: modelCatalog(env, provider).terra,
     effort: "medium",
     needsHumanInput: false,
     clarificationProbability: null,

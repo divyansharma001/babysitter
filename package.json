@@ -5,11 +5,12 @@
   "type": "module",
   "description": "Jev-powered automatic model routing for coding agents",
   "bin": {
-    "codex": "./src/codex-wrapper.js"
+    "codex": "./src/codex-wrapper.js",
+    "claude": "./src/claude-wrapper.js"
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/codex-wrapper.js && node --check src/terminal-chat.js && node --check src/terminal-ui.js && node --check src/app-server-client.js && node --check src/jev.js && node --check src/policy.js"
+    "check": "node --check src/codex-wrapper.js && node --check src/claude-wrapper.js && node --check src/terminal-chat.js && node --check src/terminal-ui.js && node --check src/app-server-client.js && node --check src/jev.js && node --check src/policy.js"
   },
   "engines": {
     "node": ">=20"
