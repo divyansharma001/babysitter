@@ -112,10 +112,11 @@ async function selectRoute(prompt) {
   return routeFor(prompt);
 }
 
-async function interactive(real) {
+async function interactive(real, { resumeRef = "", continueSession = false } = {}) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const colors = palette();
-  let sessionId = process.env.JEV_CLAUDE_SESSION_ID || "";
+  let sessionId = resumeRef || process.env.JEV_CLAUDE_SESSION_ID || "";
+  let shouldContinue = continueSession && !sessionId;
   printWelcome(process.stdout, "Claude Code");
   process.stdout.write(`${colors.green("✓")} ${colors.dim("Claude Code session ready")}\n\n`);
   try {
@@ -130,6 +131,7 @@ async function interactive(real) {
       const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
       const args = ["-p", guarded, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
       if (sessionId) args.push("--resume", sessionId);
+      else if (shouldContinue) args.push("--continue");
       const startedAt = new Date().toISOString();
       const stopWorking = startSpinner(`${route.model} is thinking`);
       let raw;
@@ -142,10 +144,14 @@ async function interactive(real) {
       }
       try {
         const result = JSON.parse(raw);
-        if (result.session_id) sessionId = result.session_id;
+        if (result.session_id) {
+          sessionId = result.session_id;
+          shouldContinue = false;
+        }
         if (result.result) printAnswer(result.result, {
           status: "complete", model: route.model, startedAt, completedAt,
         }, process.stdout, "CLAUDE");
+        if (sessionId) process.stdout.write(`${colors.dim(`  Session · ${sessionId}`)}\n\n`);
       } catch {
         process.stdout.write(raw);
       }
@@ -158,6 +164,18 @@ async function main() {
   const real = realClaude();
   if (!real) throw new Error("Could not locate the official Claude Code executable. Set JEV_AUTO_REAL_CLAUDE to its full path.");
   if (process.env.JEV_AUTO_CLAUDE_BYPASS === "1") return runClaude(real, args);
+  if (args[0] === "resume") {
+    const resumeRef = args.slice(1).join(" ").trim();
+    if (!resumeRef) {
+      throw new Error("Usage: bbs-claude resume <session-id-or-name>. Run `claude --resume` to browse Claude Code's provider-owned session picker.");
+    }
+    return interactive(real, { resumeRef });
+  }
+  if (args[0] === "continue") return interactive(real, { continueSession: true });
+  if (args[0] === "sessions") {
+    console.error("[babysitter] Opening Claude Code's session picker. This is browse-only; use `bbs-claude resume <session-id-or-name>` to resume a selected session with routing.");
+    return runClaude(real, ["--resume"]);
+  }
   if (!args.length) return interactive(real);
 
   if (

@@ -5,8 +5,8 @@
 Babysitter classifies each prompt with Jev, applies a small, inspectable routing policy, and runs that prompt with the appropriate model. It keeps the official `codex` and `claude` commands untouched:
 
 ```sh
-bbs-Codex   # a routed Codex session
-bbs-Claude  # a routed Claude Code session
+bbs-codex   # a routed Codex session
+bbs-claude  # a routed Claude Code session
 
 codex       # normal Codex
 claude      # normal Claude Code
@@ -56,21 +56,21 @@ cp .env.example .env
 npm link
 ```
 
-`npm link` makes `bbs-Codex` and `bbs-Claude` available in your terminal. Your `.env` stays local and must never be committed.
+`npm link` makes `bbs-codex` and `bbs-claude` available in your terminal. Your `.env` stays local and must never be committed.
 
 ### 3. Start a routed session
 
 ```sh
-bbs-Codex
+bbs-codex
 # or
-bbs-Claude
+bbs-claude
 ```
 
 You can also supply a first prompt directly:
 
 ```sh
-bbs-Codex "Find and fix the race condition in the payment worker"
-bbs-Claude "Find and fix the race condition in the payment worker"
+bbs-codex "Find and fix the race condition in the payment worker"
+bbs-claude "Find and fix the race condition in the payment worker"
 ```
 
 Type `/exit` or `/quit` to leave an interactive session.
@@ -120,7 +120,7 @@ The defaults follow the [Codex model guide](https://learn.chatgpt.com/docs/model
 
 This is a mapping rather than a claim that Claude has four matching model families. The [Claude model overview](https://platform.claude.com/docs/en/models/overview) positions Haiku as its fastest tier, Sonnet as the speed/intelligence balance, and Opus for complex agentic coding. Astra is therefore a stricter Babysitter tier on Opus, not a fourth Anthropic model.
 
-`bbs-Claude` runs Claude Code in print mode for each turn, selects `--model`, and resumes the returned session ID on the next turn. It sends `--effort` only to models that support it—Haiku uses Claude Code's default. The behavior relies on the officially supported [model, effort, print, and resume options](https://code.claude.com/docs/en/cli-reference).
+`bbs-claude` runs Claude Code in print mode for each turn, selects `--model`, and resumes the returned session ID on the next turn. It sends `--effort` only to models that support it—Haiku uses Claude Code's default. The behavior relies on the officially supported [model, effort, print, and resume options](https://code.claude.com/docs/en/cli-reference).
 
 Override Claude mappings with `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL`. Use a model ID only when it is available to your Claude Code account.
 
@@ -162,12 +162,35 @@ For a redistributable agent product, use an Anthropic API key or supported cloud
 One-shot Codex commands are routed too:
 
 ```sh
-bbs-Codex exec "Review the current changes for security problems"
+bbs-codex exec "Review the current changes for security problems"
 ```
+
+## Resume saved sessions
+
+Babysitter can resume a provider session and continue routing **each new prompt**.
+
+```sh
+# List saved Codex threads, then copy an ID if you want one directly
+bbs-codex sessions
+
+# Choose from the saved Codex threads in an interactive picker
+bbs-codex resume
+
+# Resume one Codex thread directly
+bbs-codex resume <thread-id>
+
+# Continue the most recent Claude Code session in this directory
+bbs-claude continue
+
+# Resume a Claude Code session by its ID or name
+bbs-claude resume <session-id-or-name>
+```
+
+`bbs-claude` prints its session ID after a successful response so it can be resumed later. `bbs-claude sessions` opens Claude Code's native session picker for browsing, but that picker is provider-owned and runs as normal Claude Code; use `bbs-claude resume <session-id-or-name>` to return to a routed Babysitter session.
 
 ## Limitations
 
-- Babysitter only controls sessions started with `bbs-Codex` or `bbs-Claude`; it cannot intercept prompts in an already-running official session.
+- Babysitter only controls sessions started with `bbs-codex` or `bbs-claude`; it cannot intercept prompts in an already-running official session.
 - A lightweight Jev classification call is made for every prompt. Savings depend on your workload, model availability, and whether the routing decision avoids retries.
 - Model availability, effort controls, pricing, and authentication are determined by Codex and Claude Code accounts—not by Babysitter.
 - Claude Code support requires the official CLI to be installed and authenticated locally.

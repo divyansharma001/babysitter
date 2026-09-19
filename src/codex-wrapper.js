@@ -7,9 +7,10 @@ import process from "node:process";
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
 import { startTerminalChat } from "./terminal-chat.js";
+import { printSessions } from "./terminal-ui.js";
 
 const wrapperPath = fileURLToPath(import.meta.url);
-const PASSTHROUGH = new Set(["agents", "login", "logout", "mcp", "plugin", "app", "completion", "update", "doctor", "sandbox", "debug", "apply", "resume", "archive", "delete", "migrate-rollouts", "unarchive", "fork", "queue", "cloud", "app-server", "exec-server", "features", "help", "review"]);
+const PASSTHROUGH = new Set(["agents", "login", "logout", "mcp", "plugin", "app", "completion", "update", "doctor", "sandbox", "debug", "apply", "archive", "delete", "migrate-rollouts", "unarchive", "fork", "queue", "cloud", "app-server", "exec-server", "features", "help", "review"]);
 
 function loadLocalEnv() {
   if (process.env.TYPESAFE_API_KEY) return;
@@ -44,6 +45,19 @@ async function main() {
   const real = realCodex();
   if (!real) throw new Error("Could not locate the real Codex executable. Set JEV_AUTO_REAL_CODEX to its full path.");
   if (process.env.JEV_AUTO_BYPASS === "1") return run(real, args);
+
+  if (args[0] === "sessions") {
+    const { CodexAppServer } = await import("./app-server-client.js");
+    printSessions(await CodexAppServer.listThreads(process.cwd()));
+    return;
+  }
+
+  if (args[0] === "resume") {
+    loadLocalEnv();
+    const threadId = args[1] === "--last" ? "" : args[1] || "";
+    await startTerminalChat({ cwd: process.cwd(), resumeThreadId: threadId, chooseResume: !threadId });
+    return;
+  }
 
   if (args.length === 0) {
     loadLocalEnv();

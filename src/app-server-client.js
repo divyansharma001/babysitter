@@ -2,13 +2,44 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 export class CodexAppServer {
-  static async create(cwd) {
+  static async connect(cwd) {
     const client = new CodexAppServer(cwd);
     await client.request("initialize", { clientInfo: { name: "babysitter", title: "Babysitter", version: "0.1.0" } });
     client.notify("initialized", {});
+    return client;
+  }
+
+  static async create(cwd) {
+    const client = await CodexAppServer.connect(cwd);
     const started = await client.request("thread/start", { cwd, model: "gpt-5.6-terra", approvalPolicy: "never" });
     client.threadId = started.thread.id;
     return client;
+  }
+
+  static async resume(cwd, threadId) {
+    const client = await CodexAppServer.connect(cwd);
+    const resumed = await client.request("thread/resume", {
+      threadId,
+      cwd,
+      approvalPolicy: "never",
+      excludeTurns: true,
+    });
+    client.threadId = resumed.thread.id;
+    return client;
+  }
+
+  static async listThreads(cwd, limit = 30) {
+    const client = await CodexAppServer.connect(cwd);
+    try {
+      const result = await client.request("thread/list", {
+        limit,
+        sortKey: "updated_at",
+        sortDirection: "desc",
+      });
+      return [...new Map((result.data || []).map((thread) => [thread.id, thread])).values()];
+    } finally {
+      client.close();
+    }
   }
 
   constructor(cwd) {

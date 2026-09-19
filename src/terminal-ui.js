@@ -113,6 +113,23 @@ export function printAnswer(output, job, stream = process.stdout, provider = "CO
   stream.write(`${colors.gray("╰─")} ${ok ? colors.green("✓ Complete") : colors.red("✗ Failed")} ${colors.dim(`· ${job.model} · ${seconds}s`)}\n\n`);
 }
 
+export function printSessions(threads, stream = process.stdout) {
+  const colors = palette(hasColor(stream));
+  if (!threads.length) {
+    stream.write(`${colors.dim("No saved sessions found.")}\n`);
+    return;
+  }
+  stream.write(`${colors.bold(colors.magenta("SAVED CODEX SESSIONS"))}\n`);
+  threads.forEach((thread, index) => {
+    const title = (thread.name || thread.preview || "Untitled session").split("\n")[0];
+    const model = thread.model || "saved model";
+    const location = thread.cwd || "unknown directory";
+    stream.write(`${colors.cyan(`${index + 1}.`)} ${title}\n`);
+    stream.write(`   ${colors.dim(`${thread.id} · ${model} · ${location}`)}\n`);
+  });
+  stream.write("\n");
+}
+
 export function startSpinner(label, stream = process.stdout) {
   const colors = palette(hasColor(stream));
   if (!stream.isTTY) {
