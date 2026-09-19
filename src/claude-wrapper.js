@@ -15,9 +15,10 @@ import {
 } from "./claude-permissions.js";
 import { chooseClaudeSessionRoute, claudeUsage } from "./claude-session-policy.js";
 import { classifyPrompt } from "./jev.js";
-import { fallbackRoute, routeTask } from "./policy.js";
+import { claudeRouteView, fallbackRoute, routeTask } from "./policy.js";
 import { palette, printAnswer, printRoute, printWelcome, startSpinner } from "./terminal-ui.js";
 import { checkForBabysitterUpdate, updateNotice } from "./update.js";
+import { captureClipboardImage, claudePromptWithImages, resolveImagePath } from "./image-input.js";
 
 const wrapperPath = realpathSync(fileURLToPath(import.meta.url));
 const PASSTHROUGH = new Set([
@@ -92,7 +93,7 @@ function runClaudeNative(real, args) {
   });
 }
 
-async function runClaudeInteractiveTurn(real, prompt, route, permissionMode, session, rl, onInputStart, onInputEnd) {
+async function runClaudeInteractiveTurn(real, prompt, route, permissionMode, session, rl, onInputStart, onInputEnd, imagePaths = []) {
   let result;
   const options = {
     cwd: process.cwd(),
@@ -119,7 +120,7 @@ async function runClaudeInteractiveTurn(real, prompt, route, permissionMode, ses
   if (session.sessionId) options.resume = session.sessionId;
   else if (session.shouldContinue) options.continue = true;
 
-  for await (const message of query({ prompt, options })) {
+  for await (const message of query({ prompt: claudePromptWithImages(prompt, imagePaths), options })) {
     if (message.type === "result") result = message;
   }
   if (!result) throw new Error("Claude ended without returning a result");
@@ -132,7 +133,8 @@ async function runClaudeInteractiveTurn(real, prompt, route, permissionMode, ses
 function printClaudeRoute(route, usage, fallback) {
   // Haiku has no effort control. Show the actual behavior in the card rather
   // than implying that the policy's low-effort value was passed to Claude.
-  const visibleRoute = /haiku/i.test(route.model) ? { ...route, effort: "default (Haiku)" } : route;
+  const providerRoute = claudeRouteView(route);
+  const visibleRoute = /haiku/i.test(route.model) ? { ...providerRoute, effort: "default (Haiku)" } : providerRoute;
   printRoute(visibleRoute, usage, fallback);
 }
 
@@ -179,6 +181,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
   let pendingHandoff = "";
   let routingState = { route: null, contextTokens: 0, turnsOnModel: 0 };
   let activePermissionMode = claudePermissionMode();
+  let pendingImages = [];
   let nextPrompt = initialPrompt;
   printWelcome(process.stdout, "Claude Code");
   const availableUpdate = await checkForBabysitterUpdate();
@@ -196,6 +199,8 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
           "\nBabysitter commands",
           "  /compact [focus]  create a small handoff and start a fresh routed Claude session",
           "  /status           show the active route, context estimate, and session ID",
+          "  /paste            attach the image currently on the macOS clipboard",
+          "  /image <path>      attach an image file for the next prompt",
           "  /permissions      show or change the routed Claude permission mode",
           "  /new              start a fresh routed session",
           "  /native           open this session in the full Claude Code terminal",
@@ -221,13 +226,26 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
         continue;
       }
       if (command === "/status") {
-        process.stdout.write(`\nSession     ${sessionId || "new"}\nModel       ${routingState.route?.model || "not selected"}\nEffort      ${routingState.route?.effort || "not selected"}\nPermission  ${activePermissionMode}\nContext     ~${routingState.contextTokens.toLocaleString()} tokens\n\n`);
+        process.stdout.write(`\nSession     ${sessionId || "new"}\nModel       ${routingState.route?.model || "not selected"}\nEffort      ${routingState.route?.effort || "not selected"}\nPermission  ${activePermissionMode}\nContext     ~${routingState.contextTokens.toLocaleString()} tokens\nAttachments ${pendingImages.length}\n\n`);
+        continue;
+      }
+      if (command === "/paste" || command === "/image") {
+        try {
+          const path = command === "/paste"
+            ? captureClipboardImage(process.cwd())
+            : resolveImagePath(prompt.slice(command.length), process.cwd());
+          pendingImages.push(path);
+          process.stdout.write(`${colors.green("✓")} ${colors.dim(`Attached image ${pendingImages.length}: ${path}`)}\n${colors.dim("  Type the prompt that should use it.")}\n\n`);
+        } catch (error) {
+          process.stdout.write(`${colors.yellow("!")} ${colors.dim(error.message)}\n\n`);
+        }
         continue;
       }
       if (["/new", "/clear"].includes(command)) {
         sessionId = "";
         shouldContinue = false;
         pendingHandoff = "";
+        pendingImages = [];
         routingState = { route: null, contextTokens: 0, turnsOnModel: 0 };
         process.stdout.write(`${colors.green("✓")} ${colors.dim("Started a fresh routed Claude session")}\n\n`);
         continue;
@@ -274,7 +292,10 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
         continue;
       }
       const stopRouting = startSpinner("Jev is choosing the best model");
-      const { route: candidate, usage, fallback } = await selectRoute(prompt);
+      const routingPrompt = pendingImages.length
+        ? `${prompt}\n\nThis request includes ${pendingImages.length} image attachment${pendingImages.length === 1 ? "" : "s"} for visual analysis.`
+        : prompt;
+      const { route: candidate, usage, fallback } = await selectRoute(routingPrompt);
       const decision = chooseClaudeSessionRoute(candidate, routingState, process.env);
       const { route } = decision;
       stopRouting();
@@ -288,6 +309,8 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
       let completedAt;
       let result;
       let turnError;
+      const turnImages = pendingImages;
+      pendingImages = [];
       try {
         result = await runClaudeInteractiveTurn(
           real,
@@ -303,6 +326,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
           () => {
             stopWorking = startSpinner(`${route.model} is continuing`);
           },
+          turnImages,
         );
         completedAt = new Date().toISOString();
       } catch (error) {
@@ -311,6 +335,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
         stopWorking?.();
       }
       if (turnError) {
+        pendingImages.unshift(...turnImages);
         process.stdout.write(`${colors.yellow("!")} ${colors.dim(turnError.message)}\n\n`);
         continue;
       }

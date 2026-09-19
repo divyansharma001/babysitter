@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fallbackRoute, routeTask } from "../src/policy.js";
+import { claudeRouteView, fallbackRoute, routeTask } from "../src/policy.js";
 import { chooseClaudeSessionRoute, claudeUsage } from "../src/claude-session-policy.js";
 import {
   claudePermissionArgs,
@@ -10,6 +10,7 @@ import {
 } from "../src/claude-permissions.js";
 import { answerClaudeQuestion, describeClaudeTool, handleClaudeInteraction } from "../src/claude-interaction.js";
 import { updateFromComparison, updateNotice } from "../src/update.js";
+import { imageMediaType } from "../src/image-input.js";
 
 function signals(overrides = {}) {
   return {
@@ -83,6 +84,21 @@ test("maps routing tiers to Claude model aliases", () => {
   assert.equal(routeTask(signals({ complexity: { score: 0, confidence: 0.9 } }), {}, "claude").model, "haiku");
   assert.equal(routeTask(signals(), {}, "claude").model, "sonnet");
   assert.equal(routeTask(signals({ complexity: { score: 2, confidence: 0.9 } }), {}, "claude").model, "opus");
+  assert.equal(routeTask(signals({
+    complexity: { score: 3, confidence: 0.9 },
+    breadth: { score: 2, confidence: 0.9 },
+  }), {}, "claude").model, "fable");
+});
+
+test("uses Claude-only names in the Claude route view", () => {
+  const route = routeTask(signals({
+    complexity: { score: 3, confidence: 0.9 },
+    breadth: { score: 2, confidence: 0.9 },
+  }), {}, "claude");
+  const visible = claudeRouteView(route);
+  assert.equal(visible.displayTier, "fable");
+  assert.ok(visible.reasons.some((reason) => /Fable requires/i.test(reason)));
+  assert.ok(visible.reasons.every((reason) => !/Astra|Sol|Terra|Luna/.test(reason)));
 });
 
 test("keeps a warm Claude model instead of downgrading a long session", () => {
@@ -109,7 +125,7 @@ test("allows Claude quality upgrades despite a large context", () => {
     contextTokens: 20_000,
     turnsOnModel: 5,
   }, {});
-  assert.equal(decision.route.model, "opus");
+  assert.equal(decision.route.model, "fable");
   assert.equal(decision.switched, true);
 });
 
@@ -168,10 +184,30 @@ test("returns Claude clarification answers in the same tool request", async () =
   assert.match(writes.join(""), /Which database/);
 });
 
+test("does not treat arbitrary pasted text as a permission decision", async () => {
+  const answers = ["build a dashboard instead", "1"];
+  const writes = [];
+  const result = await handleClaudeInteraction(
+    "Bash",
+    { command: "npm test" },
+    { suggestions: [] },
+    async () => answers.shift(),
+    (value) => writes.push(value),
+  );
+  assert.equal(result.behavior, "allow");
+  assert.match(writes.join(""), /was not sent to Claude/);
+});
+
 test("turns GitHub comparison data into an update notice", () => {
   const update = updateFromComparison({ ahead_by: 2, commits: [{ sha: "one" }, { sha: "two" }] });
   assert.equal(update.commits, 2);
   assert.equal(update.latestCommit, "two");
   assert.match(updateNotice(update), /2 new commits/);
   assert.equal(updateFromComparison({ ahead_by: 0 }), null);
+});
+
+test("recognizes supported image attachments", () => {
+  assert.equal(imageMediaType("screen.PNG"), "image/png");
+  assert.equal(imageMediaType("photo.jpeg"), "image/jpeg");
+  assert.equal(imageMediaType("notes.txt"), "");
 });

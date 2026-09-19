@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/codex-wrapper.js && node --check src/claude-wrapper.js && node --check src/claude-interaction.js && node --check src/claude-permissions.js && node --check src/claude-session-policy.js && node --check src/terminal-chat.js && node --check src/terminal-ui.js && node --check src/update.js && node --check src/update-cli.js && node --check src/app-server-client.js && node --check src/jev.js && node --check src/policy.js"
+    "check": "node --check src/codex-wrapper.js && node --check src/claude-wrapper.js && node --check src/claude-interaction.js && node --check src/claude-permissions.js && node --check src/claude-session-policy.js && node --check src/image-input.js && node --check src/terminal-chat.js && node --check src/terminal-ui.js && node --check src/update.js && node --check src/update-cli.js && node --check src/app-server-client.js && node --check src/jev.js && node --check src/policy.js"
   },
   "engines": {
     "node": ">=20"

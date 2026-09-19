@@ -5,6 +5,7 @@ import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
 import { palette, printAnswer, printRoute, printSessions, printWelcome, startSpinner } from "./terminal-ui.js";
 import { checkForBabysitterUpdate, updateNotice } from "./update.js";
+import { captureClipboardImage, resolveImagePath } from "./image-input.js";
 
 async function selectRoute(prompt) {
   try {
@@ -49,6 +50,7 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
   process.stdout.write(`${colors.green("✓")} ${colors.dim(selectedThreadId ? `Resumed Codex session · ${client.threadId}` : "Codex session ready")}\n\n`);
 
   let nextPrompt = initialPrompt;
+  let pendingImages = [];
   try {
     while (true) {
       let prompt;
@@ -68,6 +70,8 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
           "\nBabysitter commands",
           "  /compact  compact this Codex thread using the official app-server operation",
           "  /status   show the active thread ID",
+          "  /paste    attach the image currently on the macOS clipboard",
+          "  /image    attach an image file: /image <path>",
           "  /native   hand this thread to the full Codex terminal",
           "  /exit     leave Babysitter",
           "\nUse /native for official Codex slash commands not listed here.\n\n",
@@ -75,7 +79,19 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
         continue;
       }
       if (command === "/status") {
-        process.stdout.write(`\nThread  ${client.threadId}\nProvider Codex\nRouting  automatic per prompt\n\n`);
+        process.stdout.write(`\nThread      ${client.threadId}\nProvider    Codex\nRouting     automatic per prompt\nAttachments ${pendingImages.length}\n\n`);
+        continue;
+      }
+      if (command === "/paste" || command === "/image") {
+        try {
+          const path = command === "/paste"
+            ? captureClipboardImage(cwd)
+            : resolveImagePath(trimmed.slice(command.length), cwd);
+          pendingImages.push(path);
+          process.stdout.write(`${colors.green("✓")} ${colors.dim(`Attached image ${pendingImages.length}: ${path}`)}\n${colors.dim("  Type the prompt that should use it.")}\n\n`);
+        } catch (error) {
+          process.stdout.write(`${colors.yellow("!")} ${colors.dim(error.message)}\n\n`);
+        }
         continue;
       }
       if (command === "/compact") {
@@ -105,7 +121,10 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
       }
 
       const stopRouting = startSpinner("Jev is choosing the best model");
-      const { route, usage, fallback } = await selectRoute(trimmed);
+      const routingPrompt = pendingImages.length
+        ? `${trimmed}\n\nThis request includes ${pendingImages.length} image attachment${pendingImages.length === 1 ? "" : "s"} for visual analysis.`
+        : trimmed;
+      const { route, usage, fallback } = await selectRoute(routingPrompt);
       stopRouting();
       printRoute(route, usage, fallback);
 
@@ -113,10 +132,18 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
         ? `${trimmed}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.`
         : trimmed;
       const stopWorking = startSpinner(`${route.model} is working`);
-      const job = await client.startTurn(guardedPrompt, route);
-      await job.done;
-      stopWorking();
-      printAnswer(job.output, job);
+      const turnImages = pendingImages;
+      pendingImages = [];
+      try {
+        const job = await client.startTurn(guardedPrompt, route, turnImages);
+        await job.done;
+        stopWorking();
+        printAnswer(job.output, job);
+      } catch (error) {
+        stopWorking();
+        pendingImages.unshift(...turnImages);
+        process.stdout.write(`${colors.red("!")} ${colors.dim(error.message)}\n${colors.dim("  Attached images were kept for your next attempt.")}\n\n`);
+      }
     }
   } finally {
     terminal.close();

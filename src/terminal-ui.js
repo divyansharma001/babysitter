@@ -77,23 +77,66 @@ function tierColor(tier, colors) {
   return ({ luna: colors.green, terra: colors.cyan, sol: colors.yellow, astra: colors.magenta })[tier] || colors.cyan;
 }
 
+function visibleLength(value) {
+  return String(value).replace(/\u001b\[[0-9;]*m/g, "").length;
+}
+
+function padVisible(value, width) {
+  return `${value}${" ".repeat(Math.max(0, width - visibleLength(value)))}`;
+}
+
+function wrapLine(value, width) {
+  const text = String(value);
+  if (!text) return [""];
+  const lines = [];
+  let remaining = text;
+  while (remaining.length > width) {
+    let split = remaining.lastIndexOf(" ", width);
+    if (split < Math.floor(width * 0.45)) split = width;
+    lines.push(remaining.slice(0, split).trimEnd());
+    remaining = remaining.slice(split).trimStart();
+  }
+  lines.push(remaining);
+  return lines;
+}
+
+export function renderPanel(title, lines, { color = hasColor(), columns = process.stdout.columns || 80 } = {}) {
+  const colors = palette(color);
+  const maximum = Math.max(44, Math.min(84, columns - 4));
+  const natural = Math.max(String(title).length + 5, ...lines.map((line) => String(line).length + 2));
+  const innerWidth = Math.min(maximum, Math.max(44, natural));
+  const contentWidth = innerWidth - 2;
+  const rows = lines.flatMap((line) => wrapLine(line, contentWidth));
+  const heading = `─ ${title} `;
+  const top = `╭${heading}${"─".repeat(Math.max(0, innerWidth - heading.length))}╮`;
+  const bottom = `╰${"─".repeat(innerWidth)}╯`;
+  return [
+    colors.cyan(top),
+    ...rows.map((row) => `${colors.cyan("│")} ${padVisible(row, contentWidth)} ${colors.cyan("│")}`),
+    colors.cyan(bottom),
+  ].join("\n");
+}
+
 export function printWelcome(stream = process.stdout, provider = "Codex") {
   const colors = palette(hasColor(stream));
-  stream.write(`\n${colors.cyan("╭──────────────────────────────────────────────╮")}\n`);
-  stream.write(`${colors.cyan("│")}  ${colors.bold(colors.magenta("◆ BABYSITTER"))} ${colors.dim(`smart model routing for ${provider}`)} ${colors.cyan("│")}\n`);
-  stream.write(`${colors.cyan("╰──────────────────────────────────────────────╯")}\n`);
+  const content = `  ${colors.bold(colors.magenta("◆ BABYSITTER"))} ${colors.dim(`smart model routing for ${provider}`)}  `;
+  const innerWidth = Math.max(46, visibleLength(content));
+  stream.write(`\n${colors.cyan(`╭${"─".repeat(innerWidth)}╮`)}\n`);
+  stream.write(`${colors.cyan("│")}${padVisible(content, innerWidth)}${colors.cyan("│")}\n`);
+  stream.write(`${colors.cyan(`╰${"─".repeat(innerWidth)}╯`)}\n`);
   stream.write(`${colors.dim("  A fresh route for every prompt · /exit to quit")}\n\n`);
 }
 
 export function printRoute(route, usage, fallback, stream = process.stdout) {
   const colors = palette(hasColor(stream));
   const accent = tierColor(route.tier, colors);
+  const visibleTier = route.displayTier || route.tier;
   const confidence = route.classifierConfidence == null ? "—" : `${Math.round(route.classifierConfidence * 100)}%`;
   const clarification = route.clarificationProbability == null ? "—" : `${Math.round(route.clarificationProbability * 100)}%`;
   const router = usage?.input_tokens ? `Jev · ${usage.input_tokens} input tokens` : fallback ? "fallback policy" : "Jev";
   const reason = route.reasons?.join("; ") || "prompt classification";
 
-  stream.write(`${colors.gray("╭─")} ${colors.bold("ROUTE")} ${accent(`◆ ${route.tier.toUpperCase()}`)}\n`);
+  stream.write(`${colors.gray("╭─")} ${colors.bold("ROUTE")} ${accent(`◆ ${visibleTier.toUpperCase()}`)}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Model")}       ${accent(route.model)}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Effort")}      ${route.effort}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Confidence")}  ${confidence}\n`);

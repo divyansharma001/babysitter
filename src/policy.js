@@ -9,7 +9,14 @@ const DEFAULT_CLAUDE_MODELS = {
   luna: "haiku",
   terra: "sonnet",
   sol: "opus",
-  astra: "opus",
+  astra: "fable",
+};
+
+const CLAUDE_TIER_LABELS = {
+  luna: "haiku",
+  terra: "sonnet",
+  sol: "opus",
+  astra: "fable",
 };
 
 const LEVELS = ["luna", "terra", "sol", "astra"];
@@ -98,5 +105,23 @@ export function fallbackRoute(env = process.env, provider = "codex") {
     clarificationProbability: null,
     classifierConfidence: null,
     reasons: ["Jev unavailable; conservative fallback"],
+  };
+}
+
+export function claudeRouteView(route) {
+  const replacements = [
+    [/Astra/g, "Fable"],
+    [/Sol/g, "Opus"],
+    [/Terra/g, "Sonnet"],
+    [/Luna/g, "Haiku"],
+  ];
+  const reasons = (route.reasons || []).map((reason) => replacements.reduce(
+    (value, [pattern, replacement]) => value.replace(pattern, replacement),
+    reason,
+  ));
+  return {
+    ...route,
+    displayTier: CLAUDE_TIER_LABELS[route.tier] || route.model,
+    reasons,
   };
 }

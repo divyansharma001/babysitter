@@ -78,6 +78,22 @@ Supplying a first prompt still opens the routed interactive session. If Claude a
 
 Type `/exit` or `/quit` to leave an interactive session.
 
+### Attach images
+
+Routed Claude and Codex sessions accept images without handing the conversation to another process:
+
+```text
+/paste
+# Attaches the image currently on the macOS clipboard
+
+/image ./screenshots/error.png
+# Attaches an existing PNG, JPEG, GIF, or WebP file
+```
+
+After attaching, type the prompt that should use the image. Babysitter includes the attachment in the same provider turn and still routes that prompt normally. `/status` shows the number of images waiting for the next prompt. Clipboard captures are stored under the ignored `.babysitter/attachments/` directory.
+
+The native Codex CLI also supports pasting images directly, but provider hooks cannot currently change the active model for the same submitted prompt. Babysitter therefore uses Codex app-server and the Claude Agent SDK, the provider-supported control surfaces that allow a model choice on every turn.
+
 ## Updates
 
 Babysitter checks its GitHub repository at most once every 24 hours when a routed session starts. If the checked-out commit is behind `main`, both launchers show a short notice:
@@ -139,9 +155,9 @@ The defaults follow the [Codex model guide](https://learn.chatgpt.com/docs/model
 | Luna | `haiku` | Fast, cost-conscious work and focused sub-tasks | Claude default |
 | Terra | `sonnet` | Everyday coding and engineering | `medium` |
 | Sol | `opus` | Complex coding, broad changes, and higher-risk work | `high` |
-| Astra | `opus` | Hardest eligible work | `xhigh` |
+| Astra | `fable` | Demanding reasoning and long-horizon agentic work | `xhigh` |
 
-This is a mapping rather than a claim that Claude has four matching model families. The [Claude model overview](https://platform.claude.com/docs/en/models/overview) positions Haiku as its fastest tier, Sonnet as the speed/intelligence balance, and Opus for complex agentic coding. Astra is therefore a stricter Babysitter tier on Opus, not a fourth Anthropic model.
+This is a cross-provider mapping, not a claim that the model families are identical. The [Claude model overview](https://platform.claude.com/docs/en/models/overview) positions Haiku as its fastest tier, Sonnet as the speed/intelligence balance, Opus for complex agentic coding, and Fable for the most demanding reasoning and long-horizon agentic work. In routed Claude sessions, the terminal shows only Claude names: Haiku, Sonnet, Opus, and Fable.
 
 `bbs-claude` runs routed turns through the official Claude Agent SDK, selects `model`, and resumes the returned session ID on the next turn. It sends `effort` only to models that support it—Haiku uses Claude Code's default. Explicit `bbs-claude --print` commands continue to use Claude Code's non-interactive CLI mode.
 
@@ -149,7 +165,7 @@ Override Claude mappings with `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TER
 
 ### Cache-aware Claude routing
 
-Claude Code preserves a resumed conversation by making its previous messages available to the next request. That history still counts as context. [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) can make repeated context substantially cheaper, but the cache is model-specific: a cache created for Sonnet cannot be reused by Haiku or Opus. Changing Claude's [thinking or effort configuration](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost) can invalidate cached context too.
+Claude Code preserves a resumed conversation by making its previous messages available to the next request. That history still counts as context. [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) can make repeated context substantially cheaper, but the cache is model-specific: a cache created for Sonnet cannot be reused by Haiku, Opus, or Fable. Changing Claude's [thinking or effort configuration](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost) can invalidate cached context too.
 
 This means blindly switching models after every classification can cost more than it saves in a long chat. Babysitter therefore separates **classification** from **switching**: Jev still evaluates every prompt, while a cache-aware session policy decides whether changing the active Claude model is worth reloading the conversation.
 
@@ -275,6 +291,8 @@ Babysitter implements the commands that need to cooperate with routing and conte
 | Command | Claude | Codex |
 | --- | --- | --- |
 | `/compact` | Creates a compact handoff, then starts a fresh routed session on the next prompt | Runs Codex's official thread-compaction operation |
+| `/paste` | Attaches the image currently on the macOS clipboard to the next prompt | Same |
+| `/image <path>` | Attaches a PNG, JPEG, GIF, or WebP file to the next prompt | Same |
 | `/status` | Shows session, active route, effort, and context estimate | Shows the active thread and routing state |
 | `/permissions [mode]` | Shows or changes the routed permission mode | Not applicable |
 | `/new` or `/clear` | Starts a fresh routed session | Use `/native` and the official Codex command |

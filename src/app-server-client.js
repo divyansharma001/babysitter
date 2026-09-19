@@ -120,14 +120,17 @@ export class CodexAppServer {
     return () => this.listeners.delete(listener);
   }
 
-  async startTurn(prompt, route) {
+  async startTurn(prompt, route, imagePaths = []) {
     let resolveDone;
     const done = new Promise((resolve) => { resolveDone = resolve; });
     const job = { id: crypto.randomUUID(), status: "running", output: "", startedAt: new Date().toISOString(), model: route.model, effort: route.effort, done, resolveDone };
     this.activeJob = job;
     const result = await this.request("turn/start", {
       threadId: this.threadId,
-      input: [{ type: "text", text: prompt }],
+      input: [
+        ...imagePaths.map((path) => ({ type: "localImage", path })),
+        { type: "text", text: prompt },
+      ],
       cwd: this.cwd,
       model: route.model,
       effort: route.effort,
