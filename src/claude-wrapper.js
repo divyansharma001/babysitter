@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
+import { palette, printAnswer, printRoute, printWelcome, startSpinner } from "./terminal-ui.js";
 
 const wrapperPath = realpathSync(fileURLToPath(import.meta.url));
 const PASSTHROUGH = new Set([
@@ -69,11 +70,11 @@ function runClaude(real, args, { stream = true } = {}) {
   });
 }
 
-function routeCard(route, usage, fallback) {
-  const reason = route.reasons.join("; ");
-  const tokens = usage?.input_tokens ? ` · ${usage.input_tokens} Jev input tokens` : "";
-  const effort = /haiku/i.test(route.model) ? "default effort" : route.effort;
-  process.stderr.write(`[jev] ${route.tier.toUpperCase()} · ${route.model} · ${effort} · ${reason}${fallback ? " · fallback" : ""}${tokens}\n`);
+function printClaudeRoute(route, usage, fallback) {
+  // Haiku has no effort control. Show the actual behavior in the card rather
+  // than implying that the policy's low-effort value was passed to Claude.
+  const visibleRoute = /haiku/i.test(route.model) ? { ...route, effort: "default (Haiku)" } : route;
+  printRoute(visibleRoute, usage, fallback);
 }
 
 function effortArgs(route) {
@@ -106,31 +107,45 @@ function printInvocation(args) {
   return { prompt, forwarded };
 }
 
-async function classify(prompt) {
+async function selectRoute(prompt) {
   loadLocalEnv();
-  const result = await routeFor(prompt);
-  routeCard(result.route, result.usage, result.fallback);
-  return result.route;
+  return routeFor(prompt);
 }
 
 async function interactive(real) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const colors = palette();
   let sessionId = process.env.JEV_CLAUDE_SESSION_ID || "";
-  process.stdout.write("\nBabysitter · Claude Code — every prompt gets a fresh model choice. Type /exit to quit.\n\n");
+  printWelcome(process.stdout, "Claude Code");
+  process.stdout.write(`${colors.green("✓")} ${colors.dim("Claude Code session ready")}\n\n`);
   try {
     while (true) {
-      const prompt = (await rl.question("YOU ❯ ")).trim();
+      const prompt = (await rl.question(`${colors.bold(colors.cyan("YOU"))} ${colors.dim("❯")} `)).trim();
       if (!prompt) continue;
       if (["/exit", "/quit"].includes(prompt)) break;
-      const route = await classify(prompt);
+      const stopRouting = startSpinner("Jev is choosing the best model");
+      const { route, usage, fallback } = await selectRoute(prompt);
+      stopRouting();
+      printClaudeRoute(route, usage, fallback);
       const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
       const args = ["-p", guarded, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
       if (sessionId) args.push("--resume", sessionId);
-      const raw = await runClaude(real, args, { stream: false });
+      const startedAt = new Date().toISOString();
+      const stopWorking = startSpinner(`${route.model} is thinking`);
+      let raw;
+      let completedAt;
+      try {
+        raw = await runClaude(real, args, { stream: false });
+        completedAt = new Date().toISOString();
+      } finally {
+        stopWorking();
+      }
       try {
         const result = JSON.parse(raw);
         if (result.session_id) sessionId = result.session_id;
-        if (result.result) process.stdout.write(`\n${result.result}\n`);
+        if (result.result) printAnswer(result.result, {
+          status: "complete", model: route.model, startedAt, completedAt,
+        }, process.stdout, "CLAUDE");
       } catch {
         process.stdout.write(raw);
       }
@@ -156,7 +171,9 @@ async function main() {
   const parsed = printMode ? printInvocation(args) : { prompt: args.join(" "), forwarded: [] };
   const { prompt } = parsed;
   if (!prompt) return runClaude(real, args);
-  const route = await classify(prompt);
+  const result = await selectRoute(prompt);
+  printClaudeRoute(result.route, result.usage, result.fallback);
+  const { route } = result;
   const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
   const routed = ["-p", guarded, "--model", route.model, ...effortArgs(route), ...parsed.forwarded];
   return runClaude(real, routed);

@@ -77,10 +77,10 @@ function tierColor(tier, colors) {
   return ({ luna: colors.green, terra: colors.cyan, sol: colors.yellow, astra: colors.magenta })[tier] || colors.cyan;
 }
 
-export function printWelcome(stream = process.stdout) {
+export function printWelcome(stream = process.stdout, provider = "Codex") {
   const colors = palette(hasColor(stream));
   stream.write(`\n${colors.cyan("╭──────────────────────────────────────────────╮")}\n`);
-  stream.write(`${colors.cyan("│")}  ${colors.bold(colors.magenta("◆ BABYSITTER"))} ${colors.dim("smart model routing for Codex")} ${colors.cyan("│")}\n`);
+  stream.write(`${colors.cyan("│")}  ${colors.bold(colors.magenta("◆ BABYSITTER"))} ${colors.dim(`smart model routing for ${provider}`)} ${colors.cyan("│")}\n`);
   stream.write(`${colors.cyan("╰──────────────────────────────────────────────╯")}\n`);
   stream.write(`${colors.dim("  A fresh route for every prompt · /exit to quit")}\n\n`);
 }
@@ -89,6 +89,7 @@ export function printRoute(route, usage, fallback, stream = process.stdout) {
   const colors = palette(hasColor(stream));
   const accent = tierColor(route.tier, colors);
   const confidence = route.classifierConfidence == null ? "—" : `${Math.round(route.classifierConfidence * 100)}%`;
+  const clarification = route.clarificationProbability == null ? "—" : `${Math.round(route.clarificationProbability * 100)}%`;
   const router = usage?.input_tokens ? `Jev · ${usage.input_tokens} input tokens` : fallback ? "fallback policy" : "Jev";
   const reason = route.reasons?.join("; ") || "prompt classification";
 
@@ -96,17 +97,18 @@ export function printRoute(route, usage, fallback, stream = process.stdout) {
   stream.write(`${colors.gray("│")} ${colors.dim("Model")}       ${accent(route.model)}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Effort")}      ${route.effort}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Confidence")}  ${confidence}\n`);
+  stream.write(`${colors.gray("│")} ${colors.dim("Clarify")}     ${clarification} ${colors.dim("needs-user-decision probability")}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Why")}         ${reason}\n`);
   stream.write(`${colors.gray("│")} ${colors.dim("Router")}      ${router}\n`);
   stream.write(`${colors.gray("╰──────────────────────────────────────────────")}\n\n`);
 }
 
-export function printAnswer(output, job, stream = process.stdout) {
+export function printAnswer(output, job, stream = process.stdout, provider = "CODEX") {
   const colors = palette(hasColor(stream));
   const ok = job.status === "complete";
   const elapsed = Math.max(0, Date.parse(job.completedAt) - Date.parse(job.startedAt));
   const seconds = (elapsed / 1000).toFixed(1);
-  stream.write(`${colors.gray("╭─")} ${colors.bold(colors.magenta("CODEX"))}\n`);
+  stream.write(`${colors.gray("╭─")} ${colors.bold(colors.magenta(provider))}\n`);
   stream.write(`${renderMarkdown(output, { color: hasColor(stream) })}\n`);
   stream.write(`${colors.gray("╰─")} ${ok ? colors.green("✓ Complete") : colors.red("✗ Failed")} ${colors.dim(`· ${job.model} · ${seconds}s`)}\n\n`);
 }

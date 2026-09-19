@@ -28,6 +28,8 @@ YOU ❯ Fix the typo in README
 ╭─ ROUTE ◆ LUNA
 │ Model       gpt-5.6-luna
 │ Effort      low
+│ Confidence  94%
+│ Clarify     3% needs-user-decision probability
 │ Why         complexity=0/3
 │ Router      Jev · 143 input tokens
 ╰──────────────────────────────────────────────
