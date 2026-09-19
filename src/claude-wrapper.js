@@ -72,7 +72,14 @@ function runClaude(real, args, { stream = true } = {}) {
 function routeCard(route, usage, fallback) {
   const reason = route.reasons.join("; ");
   const tokens = usage?.input_tokens ? ` · ${usage.input_tokens} Jev input tokens` : "";
-  process.stderr.write(`[jev] ${route.tier.toUpperCase()} · ${route.model} · ${route.effort} · ${reason}${fallback ? " · fallback" : ""}${tokens}\n`);
+  const effort = /haiku/i.test(route.model) ? "default effort" : route.effort;
+  process.stderr.write(`[jev] ${route.tier.toUpperCase()} · ${route.model} · ${effort} · ${reason}${fallback ? " · fallback" : ""}${tokens}\n`);
+}
+
+function effortArgs(route) {
+  // Claude Haiku does not support Claude's effort control. Let Claude Code use
+  // its normal defaults instead of passing an unsupported flag.
+  return /haiku/i.test(route.model) ? [] : ["--effort", route.effort];
 }
 
 function printInvocation(args) {
@@ -117,7 +124,7 @@ async function interactive(real) {
       if (["/exit", "/quit"].includes(prompt)) break;
       const route = await classify(prompt);
       const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
-      const args = ["-p", guarded, "--output-format", "json", "--model", route.model, "--effort", route.effort];
+      const args = ["-p", guarded, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
       if (sessionId) args.push("--resume", sessionId);
       const raw = await runClaude(real, args, { stream: false });
       try {
@@ -151,7 +158,7 @@ async function main() {
   if (!prompt) return runClaude(real, args);
   const route = await classify(prompt);
   const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
-  const routed = ["-p", guarded, "--model", route.model, "--effort", route.effort, ...parsed.forwarded];
+  const routed = ["-p", guarded, "--model", route.model, ...effortArgs(route), ...parsed.forwarded];
   return runClaude(real, routed);
 }
 
