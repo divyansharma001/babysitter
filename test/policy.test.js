@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fallbackRoute, routeTask } from "../src/policy.js";
 import { chooseClaudeSessionRoute, claudeUsage } from "../src/claude-session-policy.js";
+import {
+  claudePermissionArgs,
+  claudePermissionMode,
+  hasClaudePermissionOverride,
+  isRoutedPermissionMode,
+} from "../src/claude-permissions.js";
+import { answerClaudeQuestion, describeClaudeTool, handleClaudeInteraction } from "../src/claude-interaction.js";
 
 function signals(overrides = {}) {
   return {
@@ -115,4 +122,47 @@ test("summarizes Claude cache usage", () => {
       output_tokens: 25,
     },
   }), { input: 100, cacheRead: 900, cacheWrite: 50, output: 25, contextTokens: 1050, costUsd: 0.12 });
+});
+
+test("uses safe file-edit permissions for routed Claude sessions", () => {
+  assert.equal(claudePermissionMode({}), "acceptEdits");
+  assert.deepEqual(claudePermissionArgs(), ["--permission-mode", "acceptEdits", "--permission-prompts", "none"]);
+});
+
+test("rejects unsafe or unknown routed Claude permission modes", () => {
+  assert.equal(claudePermissionMode({ JEV_AUTO_CLAUDE_PERMISSION_MODE: "bypassPermissions" }), "acceptEdits");
+  assert.equal(isRoutedPermissionMode("plan"), true);
+  assert.equal(isRoutedPermissionMode("bypassPermissions"), false);
+});
+
+test("detects explicit Claude permission flags", () => {
+  assert.equal(hasClaudePermissionOverride(["--permission-mode=plan"]), true);
+  assert.equal(hasClaudePermissionOverride(["--permission-prompts", "host"]), true);
+  assert.equal(hasClaudePermissionOverride(["--model", "sonnet"]), false);
+});
+
+test("maps Claude question numbers back to option labels", () => {
+  const question = {
+    question: "Which stack?",
+    options: [{ label: "React" }, { label: "Vue" }],
+    multiSelect: false,
+  };
+  assert.equal(answerClaudeQuestion(question, "2"), "Vue");
+  assert.equal(answerClaudeQuestion({ ...question, multiSelect: true }, "1, 2"), "React, Vue");
+  assert.equal(answerClaudeQuestion(question, "Svelte"), "Svelte");
+});
+
+test("formats permission requests without dumping file contents", () => {
+  assert.match(describeClaudeTool("Bash", { command: "npm test", description: "Run tests" }), /npm test/);
+  assert.equal(describeClaudeTool("Write", { file_path: "/tmp/a", content: "secret" }), "Claude wants to use Write\nPath: /tmp/a");
+});
+
+test("returns Claude clarification answers in the same tool request", async () => {
+  const writes = [];
+  const result = await handleClaudeInteraction("AskUserQuestion", {
+    questions: [{ question: "Which database?", options: [{ label: "Postgres" }, { label: "SQLite" }], multiSelect: false }],
+  }, {}, async () => "1", (value) => writes.push(value));
+  assert.equal(result.behavior, "allow");
+  assert.equal(result.updatedInput.answers["Which database?"], "Postgres");
+  assert.match(writes.join(""), /Which database/);
 });

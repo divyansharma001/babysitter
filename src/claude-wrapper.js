@@ -5,6 +5,14 @@ import { existsSync, realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import { handleClaudeInteraction } from "./claude-interaction.js";
+import {
+  claudePermissionArgs,
+  claudePermissionMode,
+  hasClaudePermissionOverride,
+  isRoutedPermissionMode,
+} from "./claude-permissions.js";
 import { chooseClaudeSessionRoute, claudeUsage } from "./claude-session-policy.js";
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
@@ -83,6 +91,43 @@ function runClaudeNative(real, args) {
   });
 }
 
+async function runClaudeInteractiveTurn(real, prompt, route, permissionMode, session, rl, onInputStart, onInputEnd) {
+  let result;
+  const options = {
+    cwd: process.cwd(),
+    model: route.model,
+    permissionMode,
+    permissionPrompts: "host",
+    pathToClaudeCodeExecutable: real,
+    canUseTool: async (toolName, input, context) => {
+      onInputStart();
+      try {
+        return await handleClaudeInteraction(
+          toolName,
+          input,
+          context,
+          (question) => rl.question(question),
+          (text) => process.stdout.write(text),
+        );
+      } finally {
+        onInputEnd();
+      }
+    },
+  };
+  if (!/haiku/i.test(route.model)) options.effort = route.effort;
+  if (session.sessionId) options.resume = session.sessionId;
+  else if (session.shouldContinue) options.continue = true;
+
+  for await (const message of query({ prompt, options })) {
+    if (message.type === "result") result = message;
+  }
+  if (!result) throw new Error("Claude ended without returning a result");
+  if (result.subtype !== "success") {
+    throw new Error(result.errors?.join("; ") || `Claude stopped with ${result.subtype}`);
+  }
+  return result;
+}
+
 function printClaudeRoute(route, usage, fallback) {
   // Haiku has no effort control. Show the actual behavior in the card rather
   // than implying that the policy's low-effort value was passed to Claude.
@@ -132,6 +177,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
   let shouldContinue = continueSession && !sessionId;
   let pendingHandoff = "";
   let routingState = { route: null, contextTokens: 0, turnsOnModel: 0 };
+  let activePermissionMode = claudePermissionMode();
   let nextPrompt = initialPrompt;
   printWelcome(process.stdout, "Claude Code");
   process.stdout.write(`${colors.green("✓")} ${colors.dim("Claude Code session ready")}\n\n`);
@@ -147,6 +193,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
           "\nBabysitter commands",
           "  /compact [focus]  create a small handoff and start a fresh routed Claude session",
           "  /status           show the active route, context estimate, and session ID",
+          "  /permissions      show or change the routed Claude permission mode",
           "  /new              start a fresh routed session",
           "  /native           open this session in the full Claude Code terminal",
           "  /rc [name]        open this session with Claude Remote Control",
@@ -155,8 +202,23 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
         ].join("\n"));
         continue;
       }
+      if (command === "/permissions") {
+        const requested = commandArgs[0];
+        if (!requested) {
+          process.stdout.write(`\nPermission  ${activePermissionMode}\nOptions     acceptEdits, plan, dontAsk, auto\n\n`);
+          continue;
+        }
+        if (!isRoutedPermissionMode(requested)) {
+          process.stdout.write(`${colors.yellow("!")} ${colors.dim("Choose acceptEdits, plan, dontAsk, or auto. Use /native when you want Claude Code's interactive approval UI.")}\n\n`);
+          continue;
+        }
+        activePermissionMode = requested;
+        const note = requested === "auto" ? " (availability depends on your Claude account)" : "";
+        process.stdout.write(`${colors.green("✓")} ${colors.dim(`Permission mode set to ${requested}${note}`)}\n\n`);
+        continue;
+      }
       if (command === "/status") {
-        process.stdout.write(`\nSession  ${sessionId || "new"}\nModel    ${routingState.route?.model || "not selected"}\nEffort   ${routingState.route?.effort || "not selected"}\nContext  ~${routingState.contextTokens.toLocaleString()} tokens\n\n`);
+        process.stdout.write(`\nSession     ${sessionId || "new"}\nModel       ${routingState.route?.model || "not selected"}\nEffort      ${routingState.route?.effort || "not selected"}\nPermission  ${activePermissionMode}\nContext     ~${routingState.contextTokens.toLocaleString()} tokens\n\n`);
         continue;
       }
       if (["/new", "/clear"].includes(command)) {
@@ -188,7 +250,7 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
           "Do not include conversational filler. Return only the handoff.",
           focus ? `Give special attention to: ${focus}` : "",
         ].filter(Boolean).join("\n");
-        const compactArgs = ["-p", compactPrompt, "--output-format", "json", "--model", routingState.route.model, ...effortArgs(routingState.route), "--resume", sessionId];
+        const compactArgs = ["-p", compactPrompt, "--output-format", "json", "--model", routingState.route.model, ...effortArgs(routingState.route), ...claudePermissionArgs(activePermissionMode), "--resume", sessionId];
         const stopCompact = startSpinner("Claude is creating a compact handoff");
         let compactRaw;
         try {
@@ -218,21 +280,38 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
       const routedPrompt = pendingHandoff
         ? `Context handoff from the previous compacted session:\n\n${pendingHandoff}\n\nNew request:\n${guarded}`
         : guarded;
-      const args = ["-p", routedPrompt, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
-      if (sessionId) args.push("--resume", sessionId);
-      else if (shouldContinue) args.push("--continue");
       const startedAt = new Date().toISOString();
-      const stopWorking = startSpinner(`${route.model} is thinking`);
-      let raw;
+      let stopWorking = startSpinner(`${route.model} is thinking`);
       let completedAt;
+      let result;
+      let turnError;
       try {
-        raw = await runClaude(real, args, { stream: false });
+        result = await runClaudeInteractiveTurn(
+          real,
+          routedPrompt,
+          route,
+          activePermissionMode,
+          { sessionId, shouldContinue },
+          rl,
+          () => {
+            stopWorking?.();
+            stopWorking = null;
+          },
+          () => {
+            stopWorking = startSpinner(`${route.model} is continuing`);
+          },
+        );
         completedAt = new Date().toISOString();
+      } catch (error) {
+        turnError = error;
       } finally {
-        stopWorking();
+        stopWorking?.();
+      }
+      if (turnError) {
+        process.stdout.write(`${colors.yellow("!")} ${colors.dim(turnError.message)}\n\n`);
+        continue;
       }
       try {
-        const result = JSON.parse(raw);
         if (result.session_id) {
           sessionId = result.session_id;
           shouldContinue = false;
@@ -250,8 +329,8 @@ async function interactive(real, { resumeRef = "", continueSession = false, init
         const cost = stats.costUsd == null ? "" : ` · $${stats.costUsd.toFixed(4)}`;
         process.stdout.write(`${colors.dim(`  Usage · ${stats.input.toLocaleString()} new · ${stats.cacheRead.toLocaleString()} cache read · ${stats.cacheWrite.toLocaleString()} cache write · ${stats.output.toLocaleString()} output${cost}`)}\n`);
         if (sessionId) process.stdout.write(`${colors.dim(`  Session · ${sessionId}`)}\n\n`);
-      } catch {
-        process.stdout.write(raw);
+      } catch (error) {
+        process.stdout.write(`${colors.yellow("!")} ${colors.dim(error.message)}\n\n`);
       }
     }
   } finally { rl.close(); }
@@ -288,6 +367,7 @@ async function main() {
 
   const printMode = args[0] === "-p" || args[0] === "--print";
   if (!printMode && args[0].startsWith("-")) return runClaude(real, args);
+  if (!printMode) return interactive(real, { initialPrompt: args.join(" ") });
   const parsed = printMode ? printInvocation(args) : { prompt: args.join(" "), forwarded: [] };
   const { prompt } = parsed;
   if (!prompt) return runClaude(real, args);
@@ -295,7 +375,10 @@ async function main() {
   printClaudeRoute(result.route, result.usage, result.fallback);
   const { route } = result;
   const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
-  const routed = ["-p", guarded, "--model", route.model, ...effortArgs(route), ...parsed.forwarded];
+  const permissionArgs = hasClaudePermissionOverride(parsed.forwarded)
+    ? []
+    : claudePermissionArgs(claudePermissionMode());
+  const routed = ["-p", guarded, "--model", route.model, ...effortArgs(route), ...permissionArgs, ...parsed.forwarded];
   return runClaude(real, routed);
 }
 

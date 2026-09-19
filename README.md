@@ -53,6 +53,7 @@ git clone https://github.com/divyansharma001/babysitter.git
 cd babysitter
 cp .env.example .env
 # Add your own TYPESAFE_API_KEY to .env
+npm install
 npm link
 ```
 
@@ -72,6 +73,8 @@ You can also supply a first prompt directly:
 bbs-codex "Find and fix the race condition in the payment worker"
 bbs-claude "Find and fix the race condition in the payment worker"
 ```
+
+Supplying a first prompt still opens the routed interactive session. If Claude asks follow-up questions or needs approval, answer in that same terminal and the current turn continues.
 
 Type `/exit` or `/quit` to leave an interactive session.
 
@@ -120,7 +123,7 @@ The defaults follow the [Codex model guide](https://learn.chatgpt.com/docs/model
 
 This is a mapping rather than a claim that Claude has four matching model families. The [Claude model overview](https://platform.claude.com/docs/en/models/overview) positions Haiku as its fastest tier, Sonnet as the speed/intelligence balance, and Opus for complex agentic coding. Astra is therefore a stricter Babysitter tier on Opus, not a fourth Anthropic model.
 
-`bbs-claude` runs Claude Code in print mode for each turn, selects `--model`, and resumes the returned session ID on the next turn. It sends `--effort` only to models that support it—Haiku uses Claude Code's default. The behavior relies on the officially supported [model, effort, print, and resume options](https://code.claude.com/docs/en/cli-reference).
+`bbs-claude` runs routed turns through the official Claude Agent SDK, selects `model`, and resumes the returned session ID on the next turn. It sends `effort` only to models that support it—Haiku uses Claude Code's default. Explicit `bbs-claude --print` commands continue to use Claude Code's non-interactive CLI mode.
 
 Override Claude mappings with `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL`. Use a model ID only when it is available to your Claude Code account.
 
@@ -188,6 +191,7 @@ Optional settings:
 | `JEV_AUTO_CLAUDE_*_MODEL` | Override a Claude tier's model |
 | `JEV_AUTO_CLAUDE_CACHE_LOCK_TOKENS` | Context estimate after which automatic Claude downgrades stop; defaults to `12000` |
 | `JEV_AUTO_CLAUDE_MIN_TURNS_PER_MODEL` | Minimum turns before an automatic Claude downgrade; defaults to `3` |
+| `JEV_AUTO_CLAUDE_PERMISSION_MODE` | Routed Claude permission mode; defaults to the safe file-edit mode `acceptEdits` |
 | `JEV_AUTO_REAL_CODEX` | Full path to Codex if automatic discovery fails |
 | `JEV_AUTO_REAL_CLAUDE` | Full path to Claude Code if automatic discovery fails |
 | `NO_COLOR=1` | Disable colored terminal output |
@@ -252,6 +256,7 @@ Babysitter implements the commands that need to cooperate with routing and conte
 | --- | --- | --- |
 | `/compact` | Creates a compact handoff, then starts a fresh routed session on the next prompt | Runs Codex's official thread-compaction operation |
 | `/status` | Shows session, active route, effort, and context estimate | Shows the active thread and routing state |
+| `/permissions [mode]` | Shows or changes the routed permission mode | Not applicable |
 | `/new` or `/clear` | Starts a fresh routed session | Use `/native` and the official Codex command |
 | `/rc [name]` | Resumes the current session with Claude Remote Control; routing pauses while native Claude is open | Not available in Codex |
 | `/native` | Opens the current session in the complete Claude Code terminal | Hands the current thread to the complete Codex terminal |
@@ -260,6 +265,27 @@ Babysitter implements the commands that need to cooperate with routing and conte
 Provider CLIs have many commands and can add more over time. Babysitter does not pretend to reimplement all of them: use `/native` whenever you need the official terminal. The same saved session is handed over, so its conversation is retained. Automatic routing is paused while the native provider terminal owns the session.
 
 Unknown slash commands are never silently sent to the model as ordinary prompt text. Babysitter explains that the command is not implemented and directs the user to `/native`.
+
+## Claude permissions in routed sessions
+
+`bbs-claude` uses Claude Code's Agent SDK for routed turns. When Claude needs approval or calls `AskUserQuestion`, Babysitter pauses the current turn, displays the request in the same terminal, accepts the user's answer, and lets Claude continue without losing the session.
+
+Babysitter starts routed turns with Claude Code's [`acceptEdits` permission mode](https://code.claude.com/docs/en/permissions). Ordinary file edits and common filesystem operations are approved automatically. Protected commands open an interactive prompt with **allow once**, **always allow** (when Claude supplies a safe persistent rule), and **deny** choices. Claude's clarification questions appear as numbered choices and also accept a free-text answer. Babysitter intentionally does not expose `bypassPermissions` as a routed mode.
+
+For a denial, type `n` or add feedback after it, such as `n use the staging database instead`. Claude receives that explanation and can adjust its approach without ending the routed session.
+
+Use `/permissions` to see the current policy, or change it for subsequent turns:
+
+```text
+/permissions acceptEdits  # default: edit files, keep broader actions guarded
+/permissions plan         # read-only planning
+/permissions dontAsk      # deny anything not already allowed
+/permissions auto         # classifier-based approvals, when the account supports it
+```
+
+Use `/native` when a task needs another native Claude Code feature. The current session is resumed there, so the conversation is retained; automatic model routing pauses until the native terminal exits. Choosing **always allow** in Babysitter writes only a Claude-suggested local permission rule, so matching calls can continue without asking repeatedly.
+
+For a different safe default, set `JEV_AUTO_CLAUDE_PERMISSION_MODE` to `acceptEdits`, `plan`, `dontAsk`, or `auto`. Unknown values and `bypassPermissions` fall back to `acceptEdits`.
 
 ## Limitations
 
@@ -288,7 +314,7 @@ npm run check
 npm test
 ```
 
-The project uses Node's built-in test runner and has no runtime dependency install step.
+The project uses Node's built-in test runner and Anthropic's official Claude Agent SDK for interactive Claude turns.
 
 ## Contributing
 
