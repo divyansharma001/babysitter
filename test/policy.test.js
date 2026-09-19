@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { fallbackRoute, routeTask } from "../src/policy.js";
+import { chooseClaudeSessionRoute, claudeUsage } from "../src/claude-session-policy.js";
 
 function signals(overrides = {}) {
   return {
@@ -74,4 +75,44 @@ test("maps routing tiers to Claude model aliases", () => {
   assert.equal(routeTask(signals({ complexity: { score: 0, confidence: 0.9 } }), {}, "claude").model, "haiku");
   assert.equal(routeTask(signals(), {}, "claude").model, "sonnet");
   assert.equal(routeTask(signals({ complexity: { score: 2, confidence: 0.9 } }), {}, "claude").model, "opus");
+});
+
+test("keeps a warm Claude model instead of downgrading a long session", () => {
+  const current = routeTask(signals({ complexity: { score: 2, confidence: 0.9 } }), {}, "claude");
+  const candidate = routeTask(signals({ complexity: { score: 1, confidence: 0.9 } }), {}, "claude");
+  const decision = chooseClaudeSessionRoute(candidate, {
+    route: current,
+    contextTokens: 20_000,
+    turnsOnModel: 5,
+  }, {});
+  assert.equal(decision.route.model, "opus");
+  assert.equal(decision.switched, false);
+  assert.match(decision.route.reasons.at(-1), /avoid reloading/);
+});
+
+test("allows Claude quality upgrades despite a large context", () => {
+  const current = routeTask(signals({ complexity: { score: 1, confidence: 0.9 } }), {}, "claude");
+  const candidate = routeTask(signals({
+    complexity: { score: 3, confidence: 0.9 },
+    breadth: { score: 2, confidence: 0.9 },
+  }), {}, "claude");
+  const decision = chooseClaudeSessionRoute(candidate, {
+    route: current,
+    contextTokens: 20_000,
+    turnsOnModel: 5,
+  }, {});
+  assert.equal(decision.route.model, "opus");
+  assert.equal(decision.switched, true);
+});
+
+test("summarizes Claude cache usage", () => {
+  assert.deepEqual(claudeUsage({
+    total_cost_usd: 0.12,
+    usage: {
+      input_tokens: 100,
+      cache_read_input_tokens: 900,
+      cache_creation_input_tokens: 50,
+      output_tokens: 25,
+    },
+  }), { input: 100, cacheRead: 900, cacheWrite: 50, output: 25, contextTokens: 1050, costUsd: 0.12 });
 });

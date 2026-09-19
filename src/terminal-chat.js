@@ -14,7 +14,7 @@ async function selectRoute(prompt) {
   }
 }
 
-export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "", resumeThreadId = "", chooseResume = false } = {}) {
+export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "", resumeThreadId = "", chooseResume = false, nativeLauncher = null } = {}) {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   const colors = palette();
   printWelcome();
@@ -59,6 +59,47 @@ export async function startTerminalChat({ cwd = process.cwd(), initialPrompt = "
       const trimmed = prompt.trim();
       if (!trimmed) continue;
       if (trimmed === "/exit" || trimmed === "/quit") break;
+      const [command] = trimmed.split(/\s+/);
+      if (command === "/help") {
+        process.stdout.write([
+          "\nBabysitter commands",
+          "  /compact  compact this Codex thread using the official app-server operation",
+          "  /status   show the active thread ID",
+          "  /native   hand this thread to the full Codex terminal",
+          "  /exit     leave Babysitter",
+          "\nUse /native for official Codex slash commands not listed here.\n\n",
+        ].join("\n"));
+        continue;
+      }
+      if (command === "/status") {
+        process.stdout.write(`\nThread  ${client.threadId}\nProvider Codex\nRouting  automatic per prompt\n\n`);
+        continue;
+      }
+      if (command === "/compact") {
+        const stopCompact = startSpinner("Codex is compacting this thread");
+        try {
+          await client.compact();
+        } finally {
+          stopCompact();
+        }
+        process.stdout.write(`${colors.green("✓")} ${colors.dim("Codex thread compacted")}\n\n`);
+        continue;
+      }
+      if (command === "/native") {
+        if (!nativeLauncher) {
+          process.stdout.write(`${colors.yellow("!")} ${colors.dim(`Run codex resume ${client.threadId} to open the native terminal.`)}\n\n`);
+          continue;
+        }
+        process.stdout.write(`${colors.yellow("↗")} ${colors.dim("Handing this thread to native Codex; automatic routing pauses.")}\n`);
+        client.close();
+        terminal.close();
+        await nativeLauncher(client.threadId);
+        return;
+      }
+      if (command.startsWith("/")) {
+        process.stdout.write(`${colors.yellow("!")} ${colors.dim(`Babysitter does not emulate ${command}. Use /native to continue this thread in the official Codex terminal.`)}\n\n`);
+        continue;
+      }
 
       const stopRouting = startSpinner("Jev is choosing the best model");
       const { route, usage, fallback } = await selectRoute(trimmed);

@@ -5,6 +5,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
+import { chooseClaudeSessionRoute, claudeUsage } from "./claude-session-policy.js";
 import { classifyPrompt } from "./jev.js";
 import { fallbackRoute, routeTask } from "./policy.js";
 import { palette, printAnswer, printRoute, printWelcome, startSpinner } from "./terminal-ui.js";
@@ -70,6 +71,18 @@ function runClaude(real, args, { stream = true } = {}) {
   });
 }
 
+function runClaudeNative(real, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(real, args, {
+      cwd: process.cwd(),
+      env: { ...process.env, JEV_AUTO_CLAUDE_BYPASS: "1" },
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`Claude exited with ${code}`)));
+  });
+}
+
 function printClaudeRoute(route, usage, fallback) {
   // Haiku has no effort control. Show the actual behavior in the card rather
   // than implying that the policy's low-effort value was passed to Claude.
@@ -117,6 +130,8 @@ async function interactive(real, { resumeRef = "", continueSession = false } = {
   const colors = palette();
   let sessionId = resumeRef || process.env.JEV_CLAUDE_SESSION_ID || "";
   let shouldContinue = continueSession && !sessionId;
+  let pendingHandoff = "";
+  let routingState = { route: null, contextTokens: 0, turnsOnModel: 0 };
   printWelcome(process.stdout, "Claude Code");
   process.stdout.write(`${colors.green("✓")} ${colors.dim("Claude Code session ready")}\n\n`);
   try {
@@ -124,12 +139,84 @@ async function interactive(real, { resumeRef = "", continueSession = false } = {
       const prompt = (await rl.question(`${colors.bold(colors.cyan("YOU"))} ${colors.dim("❯")} `)).trim();
       if (!prompt) continue;
       if (["/exit", "/quit"].includes(prompt)) break;
+      const [command, ...commandArgs] = prompt.split(/\s+/);
+      if (command === "/help") {
+        process.stdout.write([
+          "\nBabysitter commands",
+          "  /compact [focus]  create a small handoff and start a fresh routed Claude session",
+          "  /status           show the active route, context estimate, and session ID",
+          "  /new              start a fresh routed session",
+          "  /native           open this session in the full Claude Code terminal",
+          "  /rc [name]        open this session with Claude Remote Control",
+          "  /exit             leave Babysitter",
+          "\nUse /native for any official Claude Code slash command not listed here.\n\n",
+        ].join("\n"));
+        continue;
+      }
+      if (command === "/status") {
+        process.stdout.write(`\nSession  ${sessionId || "new"}\nModel    ${routingState.route?.model || "not selected"}\nEffort   ${routingState.route?.effort || "not selected"}\nContext  ~${routingState.contextTokens.toLocaleString()} tokens\n\n`);
+        continue;
+      }
+      if (["/new", "/clear"].includes(command)) {
+        sessionId = "";
+        shouldContinue = false;
+        pendingHandoff = "";
+        routingState = { route: null, contextTokens: 0, turnsOnModel: 0 };
+        process.stdout.write(`${colors.green("✓")} ${colors.dim("Started a fresh routed Claude session")}\n\n`);
+        continue;
+      }
+      if (command === "/native" || command === "/rc") {
+        const nativeArgs = [];
+        if (sessionId) nativeArgs.push("--resume", sessionId);
+        if (command === "/rc") nativeArgs.push("--remote-control", ...commandArgs);
+        process.stdout.write(`${colors.yellow("↗")} ${colors.dim(`Opening native Claude Code${command === "/rc" ? " Remote Control" : ""}; automatic routing pauses until you return.`)}\n`);
+        await runClaudeNative(real, nativeArgs);
+        process.stdout.write(`${colors.green("✓")} ${colors.dim("Returned to Babysitter routing")}\n\n`);
+        continue;
+      }
+      if (command === "/compact") {
+        if (!sessionId || !routingState.route) {
+          process.stdout.write(`${colors.yellow("!")} ${colors.dim("There is no active Claude conversation to compact.")}\n\n`);
+          continue;
+        }
+        const focus = commandArgs.join(" ");
+        const compactPrompt = [
+          "Create a compact handoff for a fresh Claude Code session.",
+          "Preserve the goal, decisions, constraints, relevant files and symbols, changes already made, verification results, unresolved issues, and exact next steps.",
+          "Do not include conversational filler. Return only the handoff.",
+          focus ? `Give special attention to: ${focus}` : "",
+        ].filter(Boolean).join("\n");
+        const compactArgs = ["-p", compactPrompt, "--output-format", "json", "--model", routingState.route.model, ...effortArgs(routingState.route), "--resume", sessionId];
+        const stopCompact = startSpinner("Claude is creating a compact handoff");
+        let compactRaw;
+        try {
+          compactRaw = await runClaude(real, compactArgs, { stream: false });
+        } finally {
+          stopCompact();
+        }
+        const compactResult = JSON.parse(compactRaw);
+        pendingHandoff = compactResult.result || "";
+        sessionId = "";
+        shouldContinue = false;
+        routingState = { route: null, contextTokens: Math.ceil(pendingHandoff.length / 4), turnsOnModel: 0 };
+        process.stdout.write(`${colors.green("✓")} ${colors.dim(`Compacted to an approximately ${routingState.contextTokens.toLocaleString()}-token handoff; the next prompt starts a fresh routed session.`)}\n\n`);
+        continue;
+      }
+      if (command.startsWith("/")) {
+        process.stdout.write(`${colors.yellow("!")} ${colors.dim(`Babysitter does not emulate ${command}. Use /native to open the official Claude Code terminal without losing this session.`)}\n\n`);
+        continue;
+      }
       const stopRouting = startSpinner("Jev is choosing the best model");
-      const { route, usage, fallback } = await selectRoute(prompt);
+      const { route: candidate, usage, fallback } = await selectRoute(prompt);
+      const decision = chooseClaudeSessionRoute(candidate, routingState, process.env);
+      const { route } = decision;
       stopRouting();
       printClaudeRoute(route, usage, fallback);
       const guarded = route.needsHumanInput ? `${prompt}\n\nIf a missing user decision could materially change the result, ask the user before any irreversible action.` : prompt;
-      const args = ["-p", guarded, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
+      const routedPrompt = pendingHandoff
+        ? `Context handoff from the previous compacted session:\n\n${pendingHandoff}\n\nNew request:\n${guarded}`
+        : guarded;
+      const args = ["-p", routedPrompt, "--output-format", "json", "--model", route.model, ...effortArgs(route)];
       if (sessionId) args.push("--resume", sessionId);
       else if (shouldContinue) args.push("--continue");
       const startedAt = new Date().toISOString();
@@ -148,9 +235,18 @@ async function interactive(real, { resumeRef = "", continueSession = false } = {
           sessionId = result.session_id;
           shouldContinue = false;
         }
+        pendingHandoff = "";
+        const stats = claudeUsage(result);
+        routingState = {
+          route,
+          contextTokens: stats.contextTokens || routingState.contextTokens,
+          turnsOnModel: decision.switched ? 1 : routingState.turnsOnModel + 1,
+        };
         if (result.result) printAnswer(result.result, {
           status: "complete", model: route.model, startedAt, completedAt,
         }, process.stdout, "CLAUDE");
+        const cost = stats.costUsd == null ? "" : ` · $${stats.costUsd.toFixed(4)}`;
+        process.stdout.write(`${colors.dim(`  Usage · ${stats.input.toLocaleString()} new · ${stats.cacheRead.toLocaleString()} cache read · ${stats.cacheWrite.toLocaleString()} cache write · ${stats.output.toLocaleString()} output${cost}`)}\n`);
         if (sessionId) process.stdout.write(`${colors.dim(`  Session · ${sessionId}`)}\n\n`);
       } catch {
         process.stdout.write(raw);

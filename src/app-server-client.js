@@ -47,6 +47,7 @@ export class CodexAppServer {
     this.nextId = 1;
     this.pending = new Map();
     this.activeJob = null;
+    this.compaction = null;
     this.listeners = new Set();
     this.child = spawn("codex", ["app-server"], {
       cwd,
@@ -64,6 +65,10 @@ export class CodexAppServer {
         this.activeJob.status = "failed";
         this.activeJob.completedAt = new Date().toISOString();
         this.activeJob.resolveDone(this.activeJob);
+      }
+      if (this.compaction) {
+        this.compaction.reject(error);
+        this.compaction = null;
       }
       this.append(`[server] exited (${code})\n`);
     });
@@ -85,6 +90,14 @@ export class CodexAppServer {
       return;
     }
     if (message.method === "item/agentMessage/delta") this.append(message.params?.delta || "");
+    else if (message.method === "item/completed" && message.params?.item?.type === "contextCompaction" && this.compaction) {
+      this.compaction.resolve();
+      this.compaction = null;
+    }
+    else if (message.method === "turn/completed" && this.compaction && !this.activeJob) {
+      this.compaction.resolve();
+      this.compaction = null;
+    }
     else if (message.method === "turn/completed" && this.activeJob) {
       this.activeJob.status = message.params?.turn?.status === "completed" ? "complete" : "failed";
       this.activeJob.completedAt = new Date().toISOString();
@@ -122,6 +135,24 @@ export class CodexAppServer {
     });
     job.turnId = result.turn.id;
     return job;
+  }
+
+  async compact() {
+    if (this.compaction) return this.compaction.done;
+    let resolve;
+    let reject;
+    const done = new Promise((doneResolve, doneReject) => {
+      resolve = doneResolve;
+      reject = doneReject;
+    });
+    this.compaction = { done, resolve, reject };
+    try {
+      await this.request("thread/compact/start", { threadId: this.threadId });
+    } catch (error) {
+      this.compaction = null;
+      reject(error);
+    }
+    return done;
   }
 
   close() {

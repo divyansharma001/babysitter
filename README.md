@@ -16,7 +16,7 @@ claude      # normal Claude Code
 ## What it does
 
 - Makes a new model decision for **every prompt**, not just once when a session starts.
-- Preserves the conversation while allowing the model and effort to change between turns.
+- Preserves the conversation while using cache-aware model affinity to avoid wasteful Claude model switching.
 - Shows the selected tier, model, effort/default, reason, and Jev token usage before the answer.
 - Keeps routing rules deterministic and visible in [src/policy.js](src/policy.js).
 - Uses separate launcher names, so it never replaces an existing Codex or Claude Code installation.
@@ -124,6 +124,18 @@ This is a mapping rather than a claim that Claude has four matching model famili
 
 Override Claude mappings with `JEV_AUTO_CLAUDE_LUNA_MODEL`, `JEV_AUTO_CLAUDE_TERRA_MODEL`, `JEV_AUTO_CLAUDE_SOL_MODEL`, or `JEV_AUTO_CLAUDE_ASTRA_MODEL`. Use a model ID only when it is available to your Claude Code account.
 
+### Cache-aware Claude routing
+
+Claude prompt caches are model-specific, and changing effort can also invalidate cached context. Babysitter still evaluates every prompt, but it applies session affinity before accepting the recommendation:
+
+- Quality upgrades are allowed immediately.
+- Downgrades wait until the current model has handled at least three turns.
+- Once the estimated conversation context reaches 12,000 tokens, automatic downgrades are blocked to avoid loading the full history into another model.
+- Lower effort is not applied inside a warm model session because it would reset the cache.
+- `/compact` creates a focused handoff and starts a fresh routed session, allowing the next model to receive the important state without replaying the full transcript.
+
+Claude responses show new input, cache-read, cache-write, output-token, and cost data when Claude Code returns those fields. Change the defaults with `JEV_AUTO_CLAUDE_CACHE_LOCK_TOKENS` and `JEV_AUTO_CLAUDE_MIN_TURNS_PER_MODEL`.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. The only required setting is:
@@ -140,6 +152,8 @@ Optional settings:
 | `JEV_BASE_URL` | Override the Jev API base URL |
 | `JEV_AUTO_*_MODEL` | Override a Codex tier's model |
 | `JEV_AUTO_CLAUDE_*_MODEL` | Override a Claude tier's model |
+| `JEV_AUTO_CLAUDE_CACHE_LOCK_TOKENS` | Context estimate after which automatic Claude downgrades stop; defaults to `12000` |
+| `JEV_AUTO_CLAUDE_MIN_TURNS_PER_MODEL` | Minimum turns before an automatic Claude downgrade; defaults to `3` |
 | `JEV_AUTO_REAL_CODEX` | Full path to Codex if automatic discovery fails |
 | `JEV_AUTO_REAL_CLAUDE` | Full path to Claude Code if automatic discovery fails |
 | `NO_COLOR=1` | Disable colored terminal output |
@@ -187,6 +201,21 @@ bbs-claude resume <session-id-or-name>
 ```
 
 `bbs-claude` prints its session ID after a successful response so it can be resumed later. `bbs-claude sessions` opens Claude Code's native session picker for browsing, but that picker is provider-owned and runs as normal Claude Code; use `bbs-claude resume <session-id-or-name>` to return to a routed Babysitter session.
+
+## Slash commands and native terminals
+
+Babysitter implements the commands that need to cooperate with routing and context management:
+
+| Command | Claude | Codex |
+| --- | --- | --- |
+| `/compact` | Creates a compact handoff, then starts a fresh routed session on the next prompt | Runs Codex's official thread-compaction operation |
+| `/status` | Shows session, active route, effort, and context estimate | Shows the active thread and routing state |
+| `/new` or `/clear` | Starts a fresh routed session | Use `/native` and the official Codex command |
+| `/rc [name]` | Resumes the current session with Claude Remote Control; routing pauses while native Claude is open | Not available in Codex |
+| `/native` | Opens the current session in the complete Claude Code terminal | Hands the current thread to the complete Codex terminal |
+| `/help` | Shows Babysitter commands | Shows Babysitter commands |
+
+Provider CLIs have many commands and can add more over time. Babysitter does not pretend to reimplement all of them: use `/native` whenever you need the official terminal. The same saved session is handed over, so its conversation is retained. Automatic routing is paused while the native provider terminal owns the session.
 
 ## Limitations
 

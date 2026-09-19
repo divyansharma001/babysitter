@@ -33,6 +33,14 @@ function run(real, args) {
   child.on("exit", (code, signal) => { if (signal) process.kill(process.pid, signal); else process.exitCode = code ?? 1; });
 }
 
+function runAndWait(real, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(real, args, { cwd: process.cwd(), env: { ...process.env, JEV_AUTO_BYPASS: "1" }, stdio: "inherit" });
+    child.on("error", reject);
+    child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`Codex exited with ${code}`)));
+  });
+}
+
 function taskFromArgs(args) {
   if (args[0] === "exec") return args.at(-1)?.startsWith("-") ? "" : args.at(-1) || "";
   if (PASSTHROUGH.has(args[0]) || args.includes("--help") || args.includes("-h") || args.includes("--version") || args.includes("-V")) return "";
@@ -55,13 +63,21 @@ async function main() {
   if (args[0] === "resume") {
     loadLocalEnv();
     const threadId = args[1] === "--last" ? "" : args[1] || "";
-    await startTerminalChat({ cwd: process.cwd(), resumeThreadId: threadId, chooseResume: !threadId });
+    await startTerminalChat({
+      cwd: process.cwd(),
+      resumeThreadId: threadId,
+      chooseResume: !threadId,
+      nativeLauncher: (selectedThreadId) => runAndWait(real, ["resume", selectedThreadId]),
+    });
     return;
   }
 
   if (args.length === 0) {
     loadLocalEnv();
-    await startTerminalChat({ cwd: process.cwd() });
+    await startTerminalChat({
+      cwd: process.cwd(),
+      nativeLauncher: (threadId) => runAndWait(real, ["resume", threadId]),
+    });
     return;
   }
 
@@ -70,7 +86,11 @@ async function main() {
 
   if (args[0] !== "exec") {
     loadLocalEnv();
-    await startTerminalChat({ cwd: process.cwd(), initialPrompt: task });
+    await startTerminalChat({
+      cwd: process.cwd(),
+      initialPrompt: task,
+      nativeLauncher: (threadId) => runAndWait(real, ["resume", threadId]),
+    });
     return;
   }
 
